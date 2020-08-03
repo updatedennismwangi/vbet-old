@@ -55,7 +55,7 @@ class Messi(Player):
         odd_value = float(odds[odd_index])
         if odd_value < 1.02:
             return []
-        stake = self.account.normalize_stake(10)
+        stake = self.account.normalize_stake(5)
         bet = Bet(self.odd_id, market_id, odd_value, odd_name, stake)
         event.add_bet(bet)
         win = round(stake * odd_value, 2)

@@ -41,8 +41,8 @@ class Arthur(Player):
         if not self._bet:
             return []
         participants = self.event_data.get('participants')
-        market_id = 'GoalSlots'
-        odd_name = "g1"
+        market_id = 'FullTimeUnderOver2_5GoalGoalNoGoal'
+        odd_name = "HomeOver2_5GoalGoal"
         all_odds = [i for i in numpy.arange(1.02, 15, 0.01)]
         tickets = []
         # all_odds = [4.44]

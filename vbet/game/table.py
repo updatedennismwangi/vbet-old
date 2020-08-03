@@ -33,6 +33,8 @@ class LeagueTable:
         return True
 
     def feed_result(self, e_block_id: int, league: int, week: int, results: Dict, results_ids: Dict, winning_ids: Dict):
+        if not week:
+            print(week)
         if league == self.league:
             self.event_block_map[week] = e_block_id
             self.results_pool[week] = results

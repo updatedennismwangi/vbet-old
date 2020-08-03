@@ -52,19 +52,9 @@ class Socket:
         self.error_code = Socket.CLOSE_CODE
         self.profile = 'WEB'
         self.mode = COMPETITION_SOCKET
-        self.last_used: float = 0
+        self.last_used: float = time.time()
         self.host: str = host
-
-    @property
-    def ready(self):
-        return not self.lock.locked()
-
-    async def acquire(self):
-        self.last_used = time.time()
-        await self.lock.acquire()
-
-    def release(self):
-        self.lock.release()
+        self.live_xs = []
 
     def connect_callback(self, future: asyncio.Future):
         if not self.alive:
@@ -164,10 +154,16 @@ class Socket:
     async def process_message(self, message: str):
         message = decode_json(message)
         xs, resource, valid_response, body = inspect_websocket_response(message)
-        if resource == Resource.LOGIN:
-            await self.login_callback(valid_response, body)
+        try:
+            async with self.lock:
+                self.live_xs.remove(xs)
+        except ValueError:
+            pass
         else:
-            await self.user.receive(self.socket_id, xs, resource, valid_response, body)
+            if resource == Resource.LOGIN:
+                await self.login_callback(valid_response, body)
+            else:
+                await self.user.receive(self.socket_id, xs, resource, valid_response, body)
 
     async def login(self):
         login_body = {
@@ -233,6 +229,7 @@ class Socket:
             }
             if method == "POST":
                 data['req']['body'] = body
+            self.last_used = time.time()
             asyncio.create_task(self._send(resource, data))
             return self.xs
         return -1
@@ -259,6 +256,8 @@ class Socket:
 
     async def _send(self, resource: str, body: Dict):
         # logger.debug(f'[{self.user.username}:{self.socket_id}] {resource}')
+        async with self.lock:
+            self.live_xs.append(self.xs)
         try:
             p = encode_json(body)
             await self._socket.send(p)

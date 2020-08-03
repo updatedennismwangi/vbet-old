@@ -67,7 +67,7 @@ class AccountManager:
             if self._bonus_level == 6:
                 bonus_amount = self._levels[-1]
                 a = (self._jackpot_amount / bonus_amount) * 100
-                return a >= 98
+                return a >= 99.3
         return False
 
     def setup(self, credit: float):

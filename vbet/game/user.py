@@ -382,7 +382,6 @@ class User:
 
     async def send_ticket(self, ticket: Ticket):
         await self.ticket_manager.register_ticket(ticket)
-        await self.ticket_manager.poll_ticket()
 
     def tickets_complete(self, game_id: int):
         competition = self.get_competition(game_id)
@@ -429,6 +428,9 @@ class User:
         # logger.info(f'[{self.username}:{game_id}] uploaded data  League: [{league}:{len(data)}]')
 
     async def register_competition_ticket(self, ticket: Ticket):
+        competition_tickets = self.ticket_manager.active_tickets.get(ticket.game_id)
+        for ticket in competition_tickets.values():
+            ticket.status = Ticket.VOID
         if self.competition_align:
             if ticket.registered:
                 return
