@@ -1,0 +1,175 @@
+#!/usr/bin/env python
+import os
+import sys
+import inspect
+import websockets
+import asyncio
+import signal
+from typing import Any, List, Dict
+import os
+
+exec_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+app_dir = os.path.dirname(exec_dir)
+sys.path.insert(0, app_dir)
+
+from vbet.core import settings
+from vbet.utils.parser import encode_json
+from vbet.game.competition import *
+
+COMMANDS = ['add', 'remove', 'exit', 'quit', 'player']
+
+
+class Commands:
+    def __init__(self):
+        self.last_lines = []
+
+    async def uri_add(self, body: List) -> Dict:
+        username: str = None
+        password: str = None
+        demo: bool = None
+        games: List = []
+        try:
+            username = body[0]
+            password = body[1]
+            demo = body[2]
+            if len(body) > 3:
+                games = body[3:]
+        except IndexError:
+            if not username:
+                VShell.print_to_console('Add user requires username')
+            if demo is None:
+                demo = True
+            if not games:
+                games = settings.LIVE_GAMES
+            if not password:
+                password = 'default'
+        finally:
+            if username:
+                if demo == '1':
+                    demo = False
+                else:
+                    demo = True
+                if not password:
+                    password = 'default'
+                if not games:
+                    games = settings.LIVE_GAMES
+                body = {'username': username, 'password': password, 'demo': demo, 'games': games}
+                return body
+
+    async def uri_exit(self, body: List) -> Dict:
+        return {'exit': True}
+
+    async def uri_player(self, body: List):
+        username: str = None
+        player: str = None
+        odd_id: str = None
+        games: List = []
+        try:
+            username = body[0]
+            player = body[1]
+            odd_id = body[2]
+            if len(body) > 3:
+                games = body[3:]
+        except IndexError:
+            if not username or not player:
+                VShell.print_to_console('Player requires username')
+            if not games:
+                games = settings.LIVE_GAMES
+        finally:
+            if username:
+                if not games:
+                    games = settings.LIVE_GAMES
+                body = {'username': username, 'player': player, 'odd_id': odd_id, 'games': games}
+                return body
+
+
+class VShell:
+    def __init__(self):
+        self.commands = Commands()
+        self.input_queue = asyncio.Queue()
+        self.input_future: asyncio.Future = None
+        self.server_future: asyncio.Future = None
+        self.server_url = f'ws://{settings.WS_HOST}:{settings.WS_PORT}'
+        self.loop: asyncio.AbstractEventLoop = None
+        self.websocket: websockets.WebSocketClientProtocol = None
+
+    def run(self):
+        self.continue_line('$ ')
+        self.loop = asyncio.get_event_loop()
+        self.loop.add_reader(sys.stdin, self.input_reader)
+        try:
+            self.server_future = self.loop.create_task(self.setup_server())
+            self.input_future = self.loop.create_task(self.input_listener())
+            self.loop.run_forever()
+        except KeyboardInterrupt:
+            self.clean_up()
+
+    async def execute_commands(self, input_data: str):
+        args = input_data.split(' ')
+        if args:
+            uri = args[0]
+            if uri in COMMANDS:
+                callback = getattr(self.commands, f'uri_{uri}', None)
+                if callback:
+                    body = await callback(args[1:])
+                    if body:
+                        payload = {'uri': uri, 'body': body}
+                        self.print_to_console(payload)
+                        await self.websocket.send(encode_json(payload))
+            else:
+                self.print_to_console(f'Invalid command')
+
+    async def setup_server(self):
+        try:
+            async with websockets.connect(self.server_url, close_timeout=0.1) as websocket:
+                self.websocket = websocket
+                while True:
+                    try:
+                        payload = await websocket.recv()
+                        self.continue_line(f'>>> {payload} \n')
+                        self.continue_line('$ ')
+                    except websockets.ConnectionClosed:
+                        break
+        except ConnectionError:
+            pass
+        finally:
+            self.kill_application()
+
+    def input_reader(self):
+        self.continue_line('$ ')
+        asyncio.create_task(self.input_queue.put(sys.stdin.readline().rstrip('\n').strip()))
+
+    async def input_listener(self):
+        while True:
+            payload = await self.input_queue.get()
+            self.commands.last_lines.append(payload)
+            if payload == 'quit':
+                await self.websocket.close(code=4001, reason='Exit session')
+                break
+            else:
+                await self.execute_commands(payload)
+
+    def clean_up(self):
+        if not self.server_future.done():
+            self.server_future.cancel()
+        if not self.input_future.done():
+            self.input_future.cancel()
+
+    def kill_application(self):
+        self.clean_up()
+        os.kill(os.getpid(), signal.SIGINT)
+
+    @staticmethod
+    def continue_line(payload):
+        sys.stdout.write(f'\r {payload}')
+        sys.stdout.flush()
+
+    @staticmethod
+    def print_to_console(payload):
+        VShell.continue_line(f'>>> {payload} \n')
+        VShell.continue_line('$ ')
+
+
+if __name__ == "__main__":
+    vshell = VShell()
+    vshell.run()
