@@ -1,7 +1,7 @@
 from vbet.utils.log import *
 from vbet.utils.parser import decode_json, encode_json
 from vbet.game.user import User
-from vbet.api.auth import login_password, HEADERS, COOKIES_URL
+from vbet.game.api.auth import login_password, HEADERS, COOKIES_URL
 from vbet.core import settings
 from typing import Any, Dict, List
 import aioredis

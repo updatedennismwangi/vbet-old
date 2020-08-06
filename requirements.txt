@@ -11,4 +11,4 @@ multidict==4.7.6
 numpy==1.19.1
 pytz==2020.1
 websockets==8.1
-yarl==1.4.2
+yarl==1.5.1

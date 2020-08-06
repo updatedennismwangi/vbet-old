@@ -84,10 +84,10 @@ class LeagueCompetition:
         self.jackpot_ready = False
 
         self.players = {
-            # 'messi': Messi(self),
+            'messi': Messi(self),
             # 'neymar': Neymar(self),
             # 'arthur': Arthur(self),
-            'fati': Fati(self),
+            # 'fati': Fati(self),
             # 'ronaldo': Ronaldo(self)
         }
 
@@ -392,6 +392,8 @@ class LeagueCompetition:
     async def resource_events_process(self, data: Dict):
         self.e_block_id = data.get('eBlockId')
         event_data = data.get('data')
+        if not event_data:
+            print(data)
         league = event_data.get('leagueId')
         match_day = event_data.get('matchDay')
         if league != self.league:
@@ -611,8 +613,10 @@ class LeagueCompetition:
         for ticket in tickets:
             content = self.serialize_ticket(ticket)
             setattr(ticket, 'content', content)
-            await self.user.send_ticket(ticket)
+            self.user.register_ticket(ticket)
+            await self.user.ticket_manager.add_ticket(ticket)
             self.active_tickets.append(ticket.ticket_key)
+        logger.debug(f'[{self.user.username}:{self.game_id}] Processing tickets complete : {len(tickets)}')
 
     def serialize_ticket(self, ticket):
         events = ticket.events
@@ -668,6 +672,7 @@ class LeagueCompetition:
         self.active_tickets = []
 
     async def on_ticket_complete(self):
+        logger.debug(f'[{self.user.username}:{self.game_id}] Tickets completed : {len(self.active_tickets)}')
         self.phase = LeagueCompetition.RESULTS
         await self.next_block_result()
 

@@ -1,4 +1,5 @@
 from vbet.utils.log import *
+from vbet.core import settings
 import vbet
 import asyncio
 from vbet.core.ws_server import WsServer
@@ -31,7 +32,7 @@ class Vbet:
         logger.info(f'Vbet Server version {vbet.__VERSION__}')
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         self.loop = asyncio.get_event_loop()
-        self.loop.set_debug(True)
+        self.loop.set_debug(settings.DEBUG)
         self.loop.run_until_complete(self.manager.init(self.loop))
         self.ws_server.setup()
         self.close_future = self.loop.create_task(self._terminate())

@@ -1,8 +1,7 @@
 import os
-import inspect
 
-exec_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-BASE_DIR = '/home/update/Desktop/www/app'
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 
 WS_HOST = 'localhost'
 WS_PORT = 9000
@@ -14,11 +13,17 @@ API_NAME = BETIKA
 
 DEBUG = True
 
+LOG_LEVEL = 'DEBUG'
+
+FILE_LOG_LEVEL = 'DEBUG'
+
 REDIS_URI = 'redis://localhost:6379'
 
-CACHE_DIR = f'{BASE_DIR}/cache'
+TMP_DIR = f'{BASE_DIR}/tmp'
 
-TMP_DIR = f'{BASE_DIR}/data'
+DATA_DIR = f'{TMP_DIR}/data'
+
+CACHE_DIR = f'{TMP_DIR}/cache'
 
 LOG_DIR = f'{BASE_DIR}/logs'
 
@@ -34,6 +39,11 @@ SERVERS = ['52.30.183.76', '52.210.189.174']
 
 
 def setup():
-    pass
-
+    from vbet.utils.iofile import create_dir
+    create_dir(LOG_DIR)
+    create_dir(TMP_DIR)
+    create_dir(DATA_DIR)
+    create_dir(CACHE_DIR)
+    for game in LIVE_GAMES:
+        create_dir(f'{CACHE_DIR}/{game}')
 

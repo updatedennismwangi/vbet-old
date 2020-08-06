@@ -39,9 +39,9 @@ class Messi(Player):
                 self.event_id = event_id
                 self.event_data = event_data
                 if player_a == self.team:
-                    self.odd_id = 51
+                    self.odd_id = 0
                 else:
-                    self.odd_id = 51
+                    self.odd_id = 1
                 self._bet = True
                 break
             else:

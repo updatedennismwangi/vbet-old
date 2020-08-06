@@ -158,29 +158,7 @@ class User:
         self.token = token
         self.http = http
 
-    def modify_player(self, player_name: str, odd_id: str, games: List):
-        logger.info(f'[{self.username} Updating player configurations ')
-        for game_id in games:
-            competition = self.get_competition(game_id)
-            if competition:
-                competition.modify_player(player_name, odd_id)
-
-    def install_competitions(self, competitions: List[int]):
-        for competition_id in competitions:
-            competition = self.competitions.get(competition_id, None)
-            if competition:
-                continue
-            else:
-                state, competition = self.create_competition(competition_id)
-                if state:
-                    logger.debug(f'[{self.username}:{competition_id}] installing competition')
-                    socket = self.get_socket(competition_id)
-                    if not socket:
-                        socket = Socket(self, competition_id)
-                        self.sockets[competition_id] = socket
-                        socket.connect()
-                    competition.init()
-
+    # Resources
     def resource_tickets(self, details: Dict):
         return {
             'tagsId': None,
@@ -207,8 +185,7 @@ class User:
             'details': details,
         }
 
-    @staticmethod
-    def resource_find_ticket_by_id(details: Dict):
+    def resource_find_ticket_by_id(self, details: Dict):
         ticket_id = details.get('ticket_id', None)
         data = {
             'n': details.get('n'),
@@ -225,10 +202,7 @@ class User:
         payload = self.resource_find_ticket_by_id(options)
         return payload
 
-    async def sync_session(self):
-        socket = await self.get_available_socket()
-        await socket.sync()
-
+    # Accounts
     async def setup_session(self, body: Dict):
         # Setup balance
         session_status = body.get('sessionStatus')
@@ -243,51 +217,6 @@ class User:
             self.settings.taxes_settings_id = body.get('taxesSettings')
             self.settings.ext_data = body.get('extData')
             self.settings.odd_settings_id = body.get('oddSettingsId')
-
-    async def sync_callback(self, xs: int, valid_response: bool, body: Dict):
-        if valid_response:
-            session_status = body.get('sessionStatus')
-            await self.process_session_status(session_status)
-
-    async def ticket_callback(self, game_id: int, xs: int, valid_response: bool, body: Dict):
-        ticket = await self.ticket_manager.find_ticket_by_xs(game_id, xs)
-        if ticket:
-            transaction = body.get('transaction')
-            if transaction:
-                # t = body.get('ticket')
-                new_credit = transaction.get('newCredit')
-                self.account_manager.total_stake = ticket.stake
-                await self.account_manager.update(new_credit)
-                logger.debug(f'[{self.username}:{ticket.game_id}] {ticket.player} ticket success [{ticket.stake}]')
-                await self.ticket_manager.ticket_success(ticket)
-            else:
-                error_code = int(body.get('errorCode'))
-                message = body.get('message')
-                logger.warning(f'[{self.username}:{ticket.game_id}] {ticket.player} '
-                               f'ticket error Code: {error_code} Message: {message}')
-                await self.ticket_manager.ticket_failed(error_code, ticket)
-
-    async def tickets_find_by_id_callback(self, xs: int, valid_response: bool, body: Any):
-        if isinstance(body, list):
-            ticket_ids = []
-            if body:
-                for ticket in body:
-                    ticket_id = ticket.get('ticketId')
-                    status = ticket.get('status')
-                    won_data = ticket.get('wonData')
-                    ticket_ids.append(ticket_id)
-                    time_send = ticket.get('timeSend')
-                    time_register = ticket.get('timeRegister')
-                    server_hash = ticket.get('serverHash')
-                    won_amount = 0
-                    won_jackpot = 0
-                    if won_data:
-                        won_amount = won_data.get('wonAmount')
-                        won_jackpot = won_data.get('wonJackpot')
-                    print(f'{ticket_id} {time_send} {time_register} {server_hash} {won_amount} {won_jackpot} {status}')
-            print("\n")
-        else:
-            print(body)
 
     async def process_session_status(self, session_status: Dict):
         credit = session_status.get('credit')
@@ -337,6 +266,58 @@ class User:
         self.ticket_manager.buffer_tickets = False
         self.ticket_manager.jackpot_resume = TicketManager.JACKPOT_NIL
 
+    # Callbacks
+    async def sync_callback(self, xs: int, valid_response: bool, body: Dict):
+        if valid_response:
+            session_status = body.get('sessionStatus')
+            await self.process_session_status(session_status)
+
+    async def ticket_callback(self, game_id: int, xs: int, valid_response: bool, body: Dict):
+        ticket = await self.ticket_manager.find_ticket_by_xs(game_id, xs)
+        if not ticket:
+            print(f'{game_id}, {xs}, {valid_response}, {self.ticket_manager.socket_map}')
+        else:
+            pass
+            # logger.debug(f'[{self.username}:{ticket.game_id}] {ticket.player} ticket response \n{ticket}')
+        if ticket:
+            transaction = body.get('transaction')
+            if transaction:
+                # t = body.get('ticket')
+                new_credit = transaction.get('newCredit')
+                self.account_manager.total_stake = ticket.stake
+                await self.account_manager.update(new_credit)
+                logger.debug(f'[{self.username}:{ticket.game_id}] {ticket.player} ticket success {ticket}')
+                await self.ticket_manager.ticket_success(ticket)
+            else:
+                error_code = int(body.get('errorCode'))
+                message = body.get('message')
+                logger.warning(f'[{self.username}:{ticket.game_id}] {ticket.player} '
+                               f'ticket error Code: {error_code} Message: {message}')
+                await self.ticket_manager.ticket_failed(error_code, ticket)
+
+    async def tickets_find_by_id_callback(self, xs: int, valid_response: bool, body: Any):
+        if isinstance(body, list):
+            ticket_ids = []
+            if body:
+                for ticket in body:
+                    ticket_id = ticket.get('ticketId')
+                    status = ticket.get('status')
+                    won_data = ticket.get('wonData')
+                    ticket_ids.append(ticket_id)
+                    time_send = ticket.get('timeSend')
+                    time_register = ticket.get('timeRegister')
+                    server_hash = ticket.get('serverHash')
+                    won_amount = 0
+                    won_jackpot = 0
+                    if won_data:
+                        won_amount = won_data.get('wonAmount')
+                        won_jackpot = won_data.get('wonJackpot')
+                    print(f'{ticket_id} {time_send} {time_register} {server_hash} {won_amount} {won_jackpot} {status}')
+            print("\n")
+        else:
+            print(body)
+
+    # Sockets configuration
     async def socket_online(self, socket_id: int):
         competition = self.competitions.get(socket_id, None)
         if competition:
@@ -358,16 +339,47 @@ class User:
             self.ticket_manager.exit()
             self.close_event.set()
 
+    # Tickets
+    def register_ticket(self, ticket: Ticket):
+        self.ticket_manager.register_ticket(ticket)
+
+    def tickets_complete(self, game_id: int):
+        competition = self.get_competition(game_id)
+        asyncio.ensure_future(competition.on_ticket_complete())
+
+    async def reset_competition_tickets(self, game_id: int):
+        await self.ticket_manager.reset_competition_tickets(game_id)
+
+    async def validate_competition_tickets(self, game_id: int):
+        await self.ticket_manager.validate_competition_tickets(game_id)
+
+    async def resolved_competition_ticket(self, ticket: Ticket):
+        competition = self.get_competition(ticket.game_id)
+        await competition.on_ticket_resolve(ticket)
+
+    async def register_competition_ticket(self, ticket: Ticket):
+        if self.competition_align:
+            if ticket.registered:
+                return
+            async with self.game_map_lock:
+                self.game_map.append(ticket.game_id)
+                self.game_map = self.game_map[1:]
+            await self.write_user_data()
+            ticket.registered = True
+
+    async def resume_competition(self, game_id: int):
+        await self.ticket_manager.resume_competition_tickets(game_id)
+
+    async def is_next_game_id(self, game_id: int):
+        async with self.game_map_lock:
+            return game_id == self.game_map[0]
+
+    # Api
     def get_competition(self, game_id: int):
         return self.competitions.get(game_id, None)
 
     def get_socket(self, socket_id: int):
         return self.sockets.get(socket_id, None)
-
-    async def get_available_socket(self):
-        sockets = [socket for socket in self.sockets.values() if socket.authorized]
-        if sockets:
-            return random.choice(sockets)
 
     def create_competition(self, game_id: int):
         state = False
@@ -380,12 +392,28 @@ class User:
             self.competitions[game_id] = competition
         return state, competition
 
-    async def send_ticket(self, ticket: Ticket):
-        await self.ticket_manager.register_ticket(ticket)
+    def modify_player(self, player_name: str, odd_id: str, games: List):
+        logger.info(f'[{self.username} Updating player configurations ')
+        for game_id in games:
+            competition = self.get_competition(game_id)
+            if competition:
+                competition.modify_player(player_name, odd_id)
 
-    def tickets_complete(self, game_id: int):
-        competition = self.get_competition(game_id)
-        asyncio.ensure_future(competition.on_ticket_complete())
+    def install_competitions(self, competitions: List[int]):
+        for competition_id in competitions:
+            competition = self.competitions.get(competition_id, None)
+            if competition:
+                continue
+            else:
+                state, competition = self.create_competition(competition_id)
+                if state:
+                    logger.debug(f'[{self.username}:{competition_id}] installing competition')
+                    socket = self.get_socket(competition_id)
+                    if not socket:
+                        socket = Socket(self, competition_id)
+                        self.sockets[competition_id] = socket
+                        socket.connect()
+                    competition.init()
 
     def send(self, socket_id: int, resource: str, body: Dict):
         socket = self.get_socket(socket_id)
@@ -407,42 +435,13 @@ class User:
         competition = self.get_competition(game_id)
         return competition.get_ticket_validation_data()
 
-    async def resume_competition(self, game_id: int):
-        await self.ticket_manager.resume_competition_tickets(game_id)
-
-    async def reset_competition_tickets(self, game_id: int):
-        await self.ticket_manager.reset_competition_tickets(game_id)
-
-    async def validate_competition_tickets(self, game_id: int):
-        await self.ticket_manager.validate_competition_tickets(game_id)
-
-    async def resolved_competition_ticket(self, ticket: Ticket):
-        competition = self.get_competition(ticket.game_id)
-        await competition.on_ticket_resolve(ticket)
-
-    async def store_competition(self, game_id: int, league: int,  data: Dict):
-        event_loop = asyncio.get_event_loop()
-        dump_data = await event_loop.run_in_executor(None, encode_json, data)
-        async with aiofile.AIOFile(f'{settings.CACHE_DIR}/{game_id}/{self.username}_{league}.json', 'w') as afp:
-            await afp.write(dump_data)
-        # logger.info(f'[{self.username}:{game_id}] uploaded data  League: [{league}:{len(data)}]')
-
-    async def register_competition_ticket(self, ticket: Ticket):
-        competition_tickets = self.ticket_manager.active_tickets.get(ticket.game_id)
-        for ticket in competition_tickets.values():
-            ticket.status = Ticket.VOID
-        if self.competition_align:
-            if ticket.registered:
-                return
-            async with self.game_map_lock:
-                self.game_map.append(ticket.game_id)
-                self.game_map = self.game_map[1:]
-            await self.write_user_data()
-            ticket.registered = True
+    async def is_competition_online(self, game_id: int):
+        competition = self.get_competition(game_id)
+        return competition.online
 
     async def read_user_data(self):
         try:
-            async with aiofile.AIOFile(f'{settings.TMP_DIR}/{self.username}.json', 'r') as afp:
+            async with aiofile.AIOFile(f'{settings.DATA_DIR}/{self.username}.json', 'r') as afp:
                 body = decode_json(await afp.read())
                 self.game_map = body.get('data', [])
         except FileNotFoundError as er:
@@ -457,17 +456,16 @@ class User:
                 self.game_map = list(self.game_map)
 
     async def write_user_data(self):
-        async with aiofile.AIOFile(f'{settings.TMP_DIR}/{self.username}.json', 'w') as afp:
+        async with aiofile.AIOFile(f'{settings.DATA_DIR}/{self.username}.json', 'w') as afp:
             body = {'data': self.game_map}
             await afp.write(encode_json(body))
 
-    async def is_next_game_id(self, game_id: int):
-        async with self.game_map_lock:
-            return game_id == self.game_map[0]
-
-    async def is_competition_online(self, game_id: int):
-        competition = self.get_competition(game_id)
-        return competition.online
+    async def store_competition(self, game_id: int, league: int,  data: Dict):
+        event_loop = asyncio.get_event_loop()
+        dump_data = await event_loop.run_in_executor(None, encode_json, data)
+        async with aiofile.AIOFile(f'{settings.CACHE_DIR}/{game_id}/{self.username}_{league}.json', 'w') as afp:
+            await afp.write(dump_data)
+        # logger.info(f'[{self.username}:{game_id}] uploaded data  League: [{league}:{len(data)}]')
 
     async def exit(self):
         for competition_id, competition in self.competitions.items():

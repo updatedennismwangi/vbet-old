@@ -6,8 +6,6 @@ from typing import List, Dict, Tuple
 from operator import attrgetter
 import asyncio
 import time
-import random
-import math
 
 logger = get_logger('ticket-manager')
 
@@ -71,7 +69,7 @@ class Event:
     def __str__(self):
         bets = [bet.__str__() for bet in self.bets]
         bets_str = "\n".join(bets)
-        return f'Event Id : {self.event_id} {self.get_formatted_participants()} \n {bets_str}'
+        return f'Event Id : {self.event_id} {self.get_formatted_participants()} \n{bets_str}'
 
     def add_bet(self, bet: Bet):
         self.bets.append(bet)
@@ -116,7 +114,7 @@ class Ticket:
     def __str__(self):
         events = [event.__str__() for event in self.events]
         events_str = "\n".join(events)
-        return f'Ticket : {self.mode} State : {self.status} \n {events_str}'
+        return f'Ticket : {self.mode} State : {self.status} Stake : {self.stake} \n{events_str}'
 
     def set_priority(self, priority: int):
         self.priority = priority
@@ -277,10 +275,10 @@ class Ticket:
 
 
 class TicketManager:
-    DEFAULT_TICKET_INTERVAL = 60
+    DEFAULT_TICKET_INTERVAL = 2
     JACKPOT_BEFORE = 0
-    JACKPOT_AFTER = 0
-    JACKPOT_NIL = 0
+    JACKPOT_AFTER = 1
+    JACKPOT_NIL = 2
 
     def __init__(self, user):
         self.user = user
@@ -295,29 +293,18 @@ class TicketManager:
         self.ticket_lock = asyncio.Lock()
         self.send_lock = asyncio.Lock()
         self.reg_lock = asyncio.Lock()
+        self.pool_lock = asyncio.Lock()
         self.ticket_sender_future: asyncio.Future = asyncio.create_task(self.ticket_listener())
         self.ticket_scanner_future: asyncio.Future = asyncio.create_task(self.ticket_scanner())
         self._ticket_wait = asyncio.Event()
         self.sockets: Dict[int, Socket] = {}
         self.socket_map: Dict[int, Dict[int, int]] = {}
-        self.min_sockets = 20
+        self.min_sockets = 2
         self.jackpot_resume: int = self.JACKPOT_NIL
         self.host_index = -1
 
-    async def poll_ticket(self):
-        for game_id, competition_tickets in self.active_tickets.items():
-            for ticket_key, t in competition_tickets.items():
-                if t.status == Ticket.READY or t.status == Ticket.FAILED:
-                    if self.user.competition_align:
-                        if await self.user.is_next_game_id(t.game_id):
-                            t.status = Ticket.WAITING
-                            await self.ticket_queue.put(t)
-                    else:
-                        t.status = Ticket.WAITING
-                        await self.ticket_queue.put(t)
-
     async def ticket_scanner(self):
-        # logger.debug(f'[{self.user.username}] ticket scanner started')
+        logger.debug(f'[{self.user.username}] ticket scanner started')
         while True:
             to_remove = []
             for game_id, competition_tickets in self.active_tickets.items():
@@ -334,23 +321,25 @@ class TicketManager:
                     if ticket.status == Ticket.SENT:
                         age = ticket.sent_time
                         now = time.time()
-                        if now - age > 20:
-                            ticket.status = Ticket.READY
-                            # print(f"Out of time ticket {ticket.events}")
+                        # if now - age > 20:
+                        #     ticket.status = Ticket.READY
+                        #      # print(f"Out of time ticket {ticket.events}")
                     if ticket.status == Ticket.SUCCESS and ticket.resolved:
                         to_remove.append(ticket)
 
             for t in to_remove:
-                self.remove_competition_ticket(t.game_id, t.ticket_key)
+                await self.remove_ticket(t)
             await self.poll_ticket()
             await asyncio.sleep(1)
 
     async def ticket_listener(self):
         logger.debug(f'[{self.user.username}] queue listener started')
         while True:
-            await self.await_ticket_interval()
             await self.poll_ticket()
-            ticket = await self.ticket_queue.get()
+            await self.wait_ticket_interval()
+            ticket_data = await self.ticket_queue.get()
+            game_id, ticket_key = ticket_data[0], ticket_data[1]
+            ticket = await self.find_ticket(game_id, ticket_key)
             if ticket is not None:
                 if self.user.account_manager.is_bonus_ready():
                     if not self.user.jackpot_ready:
@@ -364,99 +353,60 @@ class TicketManager:
 
         logger.debug(f'[{self.user.username}] queue listener stopped')
 
-    # @async_exception_logger('resolver')
-    async def resolve_ticket(self, ticket: Ticket):
-        async with self.send_lock:
-            ticket_data = self.user.resource_tickets(ticket.content)
-            socket = await self.get_available_socket()
-            while True:
-                if not socket:
-                    self._ticket_wait.clear()
-                    await self._ticket_wait.wait()
-                    socket = await self.get_available_socket()
-                else:
-                    break
-            xs = socket.send(Resource.TICKETS, body=ticket_data)
-            ticket.status = Ticket.SENT
-            ticket.sent_notify(xs, socket.socket_id)
-            print(ticket.xs, socket.socket_id)
-            socket_map = self.socket_map.get(socket.socket_id, {})
-            socket_map[ticket.xs] = ticket.game_id
-            self.socket_map[socket.socket_id] = socket_map
-            if not self.user.jackpot_ready:
-                await socket.sync()
-
-    async def resolve_demo_ticket(self, ticket: Ticket):
-        async with self.send_lock:
-            status, amount = await self.user.account_manager.borrow(ticket.stake)
-            if status:
-                ticket.status = Ticket.SUCCESS
-                await self.user.register_competition_ticket(ticket)
-                await self.poll_ticket()
-                logger.debug(f'[{self.user.username}:{ticket.game_id}] [{ticket.player}] simulation stake : '
-                             f'[{ticket.stake}]')
-                self.user.account_manager.total_stake = ticket.stake
-            else:
-                logger.debug(f'[{self.user.username}:{ticket.game_id}] [{ticket.player}] out_of_credit')
-
-            await self.check_pending_tickets(ticket.game_id)
-
-    async def await_ticket_interval(self):
-        if self.user.jackpot_ready:
-            self.last_ticket_time = time.time()
-            return
-        else:
-            ticket_interval = self.demo_ticket_interval if self.user.demo else self.ticket_interval
-        now = time.time()
-        gap = now - self.last_ticket_time
-        if ticket_interval > 0:
-            to_sleep = ticket_interval - gap
-            if to_sleep > 0:
-                await asyncio.sleep(to_sleep)
-        self.last_ticket_time = time.time()
-
-    async def register_ticket(self, ticket: Ticket):
-        # async with self.reg_lock:
-        ticket_key = await self.generate_ticket_key()
+    def register_ticket(self, ticket: Ticket):
+        ticket_key = self.generate_ticket_key()
         ticket.ticket_key = ticket_key
-        competition_tickets = self.active_tickets.get(ticket.game_id, {})
-        competition_tickets[ticket.ticket_key] = ticket
-        self.active_tickets[ticket.game_id] = competition_tickets
         return ticket_key
 
     async def send_ticket(self, ticket: Ticket):
-        if self.buffer_tickets:
-            await self.ticket_lock.acquire()
-        if self.user.demo:
-            await self.resolve_demo_ticket(ticket)
-        else:
-            credit = await self.user.account_manager.credit
-            if credit >= ticket.stake:
-                logger.debug(f'[{self.user.username}:{ticket.game_id}] [{ticket.player}] stake : {ticket.stake}')
-                await self.resolve_ticket(ticket)
+        async with self.send_lock:
+            if self.buffer_tickets:
+                await self.ticket_lock.acquire()
+            if self.user.demo:
+                await self.resolve_demo_ticket(ticket)
             else:
-                ticket.status = Ticket.ERROR_CREDIT
-                logger.warning(f'[{self.user.username}:{ticket.game_id}] [{ticket.player}] error-credit '
-                               f'[{ticket.stake}]')
-                self.last_ticket_time = time.time() - self.ticket_interval  # No ticket sent so can send instant
+                credit = await self.user.account_manager.credit
+                if credit >= ticket.stake:
+                    logger.debug(f'[{self.user.username}:{ticket.game_id}] [{ticket.player}] stake : {ticket.stake}')
+                    await self.resolve_ticket(ticket)
+                else:
+                    ticket.status = Ticket.ERROR_CREDIT
+                    logger.warning(f'[{self.user.username}:{ticket.game_id}] [{ticket.player}] error-credit '
+                                   f'[{ticket.stake}]')
+                    self.last_ticket_time = time.time() - self.ticket_interval  # No ticket sent so can send instant
 
-    async def find_ticket_by_xs(self, socket_id, xs: int):
-        socket_map = self.socket_map.get(socket_id)
-        try:
-            socket_map.pop(xs)
-            if socket_map:
-                self.socket_map[socket_id] = socket_map
+    async def resolve_ticket(self, ticket: Ticket):
+        ticket_data = self.user.resource_tickets(ticket.content)
+        socket = await self.get_available_socket()
+        while True:
+            if not socket:
+                self._ticket_wait.clear()
+                await self._ticket_wait.wait()
+                socket = await self.get_available_socket()
             else:
-                self.socket_map.pop(socket_id)
-        except KeyError:
-            pass
+                break
+        xs = socket.send(Resource.TICKETS, body=ticket_data)
+        ticket.status = Ticket.SENT
+        ticket.sent_notify(xs, socket.socket_id)
+        socket_map = self.socket_map.get(socket.socket_id, {})
+        socket_map[ticket.xs] = ticket.game_id
+        self.socket_map[socket.socket_id] = socket_map
+        if not self.user.jackpot_ready:
+            await socket.sync()
+
+    async def resolve_demo_ticket(self, ticket: Ticket):
+        status, amount = await self.user.account_manager.borrow(ticket.stake)
+        if status:
+            ticket.status = Ticket.SUCCESS
+            await self.user.register_competition_ticket(ticket)
+            await self.poll_ticket()
+            logger.debug(f'[{self.user.username}:{ticket.game_id}] [{ticket.player}] simulation stake : '
+                         f'[{ticket.stake}]')
+            self.user.account_manager.total_stake = ticket.stake
         else:
-            if not self._ticket_wait.is_set():
-                self._ticket_wait.set()
-            for competition_tickets in self.active_tickets.values():
-                for ticket_key, ticket in competition_tickets.items():
-                    if ticket.xs == xs and ticket.socket_id == socket_id:
-                        return ticket
+            logger.debug(f'[{self.user.username}:{ticket.game_id}] [{ticket.player}] out_of_credit')
+
+        await self.check_pending_tickets(ticket.game_id)
 
     async def ticket_success(self, ticket: Ticket):
         ticket.status = Ticket.SUCCESS
@@ -493,10 +443,61 @@ class TicketManager:
         if error_code == 603:
             await self.poll_ticket()
 
-    async def generate_ticket_key(self):
-        async with self._ticket_id_lock:
-            self._ticket_key += 1
-            return self._ticket_key
+    async def poll_ticket(self):
+        for game_id, competition_tickets in self.active_tickets.items():
+            for ticket_key, t in competition_tickets.items():
+                if t.status == Ticket.READY or t.status == Ticket.FAILED:
+                    if self.user.competition_align:
+                        if await self.user.is_next_game_id(t.game_id):
+                            if self.ticket_queue.qsize() < 50:
+                                await self.ticket_queue.put((t.game_id, t.ticket_key))
+                                t.status = Ticket.WAITING
+                    else:
+                        if self.ticket_queue.qsize() < 50:
+                            await self.ticket_queue.put((t.game_id, t.ticket_key))
+                            t.status = Ticket.WAITING
+
+    async def add_ticket(self, ticket: Ticket):
+        async with self.pool_lock:
+            competition_tickets = self.active_tickets.get(ticket.game_id, {})
+            competition_tickets[ticket.ticket_key] = ticket
+            self.active_tickets[ticket.game_id] = competition_tickets
+
+    async def remove_ticket(self, ticket: Ticket):
+        async with self.pool_lock:
+            competition_tickets = self.active_tickets.get(ticket.game_id, {})
+            if competition_tickets:
+                try:
+                    competition_tickets.pop(ticket.ticket_key)
+                except KeyError:
+                    pass
+            self.active_tickets[ticket.game_id] = competition_tickets
+
+    async def find_ticket(self, game_id: int, ticket_key: int):
+        async with self.pool_lock:
+            competition_tickets = self.active_tickets.get(game_id, {})
+            if competition_tickets:
+                ticket = competition_tickets.get(ticket_key, None)
+                return ticket
+
+    async def find_ticket_by_xs(self, socket_id, xs: int):
+        async with self.send_lock:
+            socket_map = self.socket_map.get(socket_id, {})
+            try:
+                game_id = socket_map.pop(xs)
+                if socket_map:
+                    self.socket_map[socket_id] = socket_map
+                else:
+                    self.socket_map.pop(socket_id)
+            except KeyError:
+                pass
+            else:
+                if not self._ticket_wait.is_set():
+                    self._ticket_wait.set()
+                competition_tickets = self.active_tickets.get(game_id, {})
+                for ticket_key, ticket in competition_tickets.items():
+                    if ticket.xs == xs and ticket.socket_id == socket_id:
+                        return ticket
 
     async def check_pending_tickets(self, game_id: int):
         competition_tickets = self.active_tickets.get(game_id)
@@ -520,16 +521,15 @@ class TicketManager:
         self.active_tickets[game_id] = {}
 
     async def validate_competition_tickets(self, game_id: int):
-        resolved = []
         competition_tickets = self.active_tickets.get(game_id, {})
         if competition_tickets:
             results, winning_ids = self.user.get_competition_results(game_id)
             for ticket in competition_tickets.values():
-                if ticket.status == Ticket.SUCCESS:
+                if ticket.status == Ticket.SUCCESS and not ticket.resolved:
                     validation_data = ticket.can_resolve(results, winning_ids)
                     if validation_data:
                         ticket.resolve(validation_data)
-                        resolved.append(ticket.ticket_key)
+                        ticket.resolved = True
                         await self.user.resolved_competition_ticket(ticket)
                         credit = await self.user.account_manager.credit
                         bonus_level = self.user.account_manager.bonus_level
@@ -554,10 +554,26 @@ class TicketManager:
                         bet_str = f'[stake : {stake_str} won : {won_str} total : {total_stake_str}]'
                         logger.info(f'[{self.user.username}:{game_id}] {ticket.player} {account_str} {bet_str}')
 
+    async def wait_ticket_interval(self):
+        if self.user.jackpot_ready:
+            self.last_ticket_time = time.time()
+            return
+        else:
+            ticket_interval = self.demo_ticket_interval if self.user.demo else self.ticket_interval
+        now = time.time()
+        gap = now - self.last_ticket_time
+        if ticket_interval > 0:
+            to_sleep = ticket_interval - gap
+            if to_sleep > 0:
+                await asyncio.sleep(to_sleep)
+        self.last_ticket_time = time.time()
+
     async def get_available_socket(self):
         sockets = [socket for socket in self.sockets.values() if socket.authorized]
         if sockets:
-            return sorted(sockets, key=attrgetter('last_used'))[0]
+            socket = sorted(sockets, key=attrgetter('last_used'))[0]
+            socket.last_used = time.time()
+            return socket
 
     def setup_jackpot(self):
         for i in range(0, self.min_sockets):
@@ -565,20 +581,15 @@ class TicketManager:
             self.sockets[i] = socket
             socket.connect()
 
+    def generate_ticket_key(self):
+        self._ticket_key += 1
+        return self._ticket_key
+
     def get_server_host(self):
         self.host_index += 1
         if self.host_index >= len(settings.SERVERS):
             self.host_index = 0
         return settings.SERVERS[self.host_index]
-
-    def remove_competition_ticket(self, game_id: int, ticket_key: int):
-        competition_tickets = self.active_tickets.get(game_id, {})
-        if competition_tickets:
-            try:
-                competition_tickets.pop(ticket_key)
-            except KeyError:
-                pass
-        self.active_tickets[game_id] = competition_tickets
 
     def exit(self):
         self.ticket_scanner_future.cancel()

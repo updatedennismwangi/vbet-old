@@ -1,6 +1,7 @@
 import logging.config
 from vbet.core import settings
 
+
 config = {
     'version': 1,
     'disable_existing_loggers': True,
@@ -14,13 +15,13 @@ config = {
     },
     'handlers': {
         'default': {
-            'level': 'DEBUG',
+            'level': settings.LOG_LEVEL,
             'formatter': 'standard',
             'class': 'logging.StreamHandler',
             'stream': 'ext://sys.stdout',
         },
         'file': {
-            'level': 'DEBUG',
+            'level': settings.FILE_LOG_LEVEL,
             'formatter': 'standard',
             'class': 'logging.FileHandler',
             'filename': f'{settings.LOG_DIR}/vbet.log'

@@ -1,6 +1,6 @@
 from vbet.utils.log import get_logger, async_exception_logger, exception_logger
 from vbet.utils.parser import decode_json, encode_json, UserResource, Resource, inspect_websocket_response
-from vbet.api.auth import login_hash, WSS_URL
+from vbet.game.api.auth import login_hash, WSS_URL
 from vbet.core import settings
 import asyncio
 from typing import Dict, List, Tuple
@@ -38,7 +38,6 @@ class Socket:
         self.user = user
         self.socket_id = socket_id
         self.xs: int = -1
-        self.lock = asyncio.Lock()
         self.max_xs: int = 10000000
         self.client_id: str = ''
         self.status = Socket.CLOSED
@@ -54,7 +53,6 @@ class Socket:
         self.mode = COMPETITION_SOCKET
         self.last_used: float = time.time()
         self.host: str = host
-        self.live_xs = []
 
     def connect_callback(self, future: asyncio.Future):
         if not self.alive:
@@ -154,16 +152,11 @@ class Socket:
     async def process_message(self, message: str):
         message = decode_json(message)
         xs, resource, valid_response, body = inspect_websocket_response(message)
-        try:
-            async with self.lock:
-                self.live_xs.remove(xs)
-        except ValueError:
-            pass
+        # logger.debug(f'[{self.user.username}:{self.socket_id}] {resource} Response')
+        if resource == Resource.LOGIN:
+            await self.login_callback(valid_response, body)
         else:
-            if resource == Resource.LOGIN:
-                await self.login_callback(valid_response, body)
-            else:
-                await self.user.receive(self.socket_id, xs, resource, valid_response, body)
+            await self.user.receive(self.socket_id, xs, resource, valid_response, body)
 
     async def login(self):
         login_body = {
@@ -229,7 +222,6 @@ class Socket:
             }
             if method == "POST":
                 data['req']['body'] = body
-            self.last_used = time.time()
             asyncio.create_task(self._send(resource, data))
             return self.xs
         return -1
@@ -255,9 +247,7 @@ class Socket:
         return await self._socket.recv()
 
     async def _send(self, resource: str, body: Dict):
-        # logger.debug(f'[{self.user.username}:{self.socket_id}] {resource}')
-        async with self.lock:
-            self.live_xs.append(self.xs)
+        # logger.debug(f'[{self.user.username}:{self.socket_id}] {resource} Request')
         try:
             p = encode_json(body)
             await self._socket.send(p)
