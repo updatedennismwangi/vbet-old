@@ -241,4 +241,5 @@ pip-selfcheck.json
 cache
 data
 logs
+tmp
 !/data/
