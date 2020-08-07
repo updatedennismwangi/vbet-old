@@ -121,7 +121,6 @@ class User:
         self.sockets: Dict[int, Socket] = {}
         self.competitions: Dict[int, LeagueCompetition] = {}
         self.games: List[int] = []
-        self.ticket_queue: asyncio.Queue = asyncio.Queue()
         self.settings = GameSettings()
         self.account_manager = AccountManager(self)
         self.ticket_manager = TicketManager(self)
@@ -337,7 +336,12 @@ class User:
                     return
             await self.http.close()
             self.ticket_manager.exit()
-            self.close_event.set()
+        else:
+            socket = self.ticket_manager.sockets.get(socket_id)
+            if socket:
+                self.ticket_manager.sockets.pop(socket_id)
+            if not self.ticket_manager.sockets:
+                self.close_event.set()
 
     # Tickets
     def register_ticket(self, ticket: Ticket):
@@ -465,7 +469,7 @@ class User:
         dump_data = await event_loop.run_in_executor(None, encode_json, data)
         async with aiofile.AIOFile(f'{settings.CACHE_DIR}/{game_id}/{self.username}_{league}.json', 'w') as afp:
             await afp.write(dump_data)
-        # logger.info(f'[{self.username}:{game_id}] uploaded data  League: [{league}:{len(data)}]')
+        logger.debug(f'[{self.username}:{game_id}] uploaded data  League: [{league}:{len(data)}]')
 
     async def exit(self):
         for competition_id, competition in self.competitions.items():

@@ -30,21 +30,27 @@ class WsServer:
 
     async def handle(self, websocket: websockets.WebSocketServerProtocol, path):
         session_index = await self.session_index
-        session = Session(self)
+        session = Session(self, session_index)
         self.sessions[session_index] = session
         logger.info(f'User connected {session_index}')
         await session.handler(websocket)
         self.sessions.pop(session_index)
         logger.info(f'User disconnected {session_index}')
 
-    async def manager_uri(self, uri: str, body: Dict):
-        await self.app.manager.ws_queue.put([uri, body])
+    async def send_to_session(self, session_key: int, uri: str, body: Dict):
+        session = self.sessions.get(session_key, None)
+        if session:
+            await session.send(uri, body)
 
-    async def application_uri(self, uri: str, body: Dict):
+    async def manager_uri(self, session_key: int, uri: str, body: Dict):
+        await self.app.manager.ws_queue.put([session_key, uri, body])
+
+    async def application_uri(self, session_key: int, uri: str, body: Dict):
         callback = getattr(self.app, f'{uri}_uri')
-        await callback(body)
+        await callback(session_key, body)
 
     async def wait_closed(self):
+        self.shutdown()
         await self.ws_server.wait_closed()
 
     def shutdown(self):

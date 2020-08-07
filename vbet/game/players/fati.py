@@ -25,18 +25,24 @@ class Fati(Player):
         for event_id, event_data in week_games.items():
             participants = event_data.get('participants')
             odds = event_data.get('odds')
-            odd_ids = [51]
+            odd_ids = [0, 1]
             _odds = []
             for odd_id in odd_ids:
                 market_id, odd_name, odd_index = Player.get_market_info(str(odd_id))
                 _odds.append(odds[odd_index])
             odd_value = max(_odds)
-            odd_id = 51
+            odd_id = _odds.index(odd_value)
+            if odd_id == 0:
+                odd_id = 207
+            else:
+                odd_id = 206
             market_id, odd_name, odd_index = Player.get_market_info(str(odd_id))
-            odd_value = round(odd_value, 2)
+            odd_value = float(odds[odd_index])
+            if odd_value < 1.3:
+                continue
             ticket = Ticket(self.competition.game_id, self.name)
             event = Event(event_id, self.competition.league, self.competition.week, participants)
-            stake = 5
+            stake = 50
             bet = Bet(odd_id, market_id, odd_value, odd_name, stake)
             event.add_bet(bet)
             win = round(stake * odd_value, 2)

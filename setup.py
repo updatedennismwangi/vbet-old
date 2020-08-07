@@ -1,7 +1,7 @@
 import setuptools
 import vbet
 
-with open("README.md", "r") as fh:
+with open("README.rst", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
@@ -11,14 +11,15 @@ setuptools.setup(
     author_email="updatedennismwangi@gmail.com",
     description="A virtual betting bot server",
     long_description=long_description,
-    long_description_content_type="text/html",
-    url="https://github.com/updatemenow/",
+    long_description_content_type="text/x-rst",
+    url="https://github.com/updatedennismwangi/vbet.git",
     packages=setuptools.find_packages(),
     scripts=['bin/run', 'bin/vs'],
     classifiers=[
-        "Programming Language :: Python :: 3",
-        "Operating System :: Linux(Debian)",
-        "License :: GPL V3 :: GNU GENERAL PUBLIC LICENSE"
+        "Programming Language :: Python :: 3.8",
+        "Operating System :: Unix",
+        "Environment :: Console,"
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     ],
     python_requires='>=3.6',
 )

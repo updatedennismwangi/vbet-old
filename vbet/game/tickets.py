@@ -581,6 +581,10 @@ class TicketManager:
             self.sockets[i] = socket
             socket.connect()
 
+    def close_sockets(self):
+        for socket in self.sockets.values():
+            future = asyncio.create_task(socket.exit())
+
     def generate_ticket_key(self):
         self._ticket_key += 1
         return self._ticket_key
@@ -592,5 +596,6 @@ class TicketManager:
         return settings.SERVERS[self.host_index]
 
     def exit(self):
+        self.close_sockets()
         self.ticket_scanner_future.cancel()
         self.ticket_sender_future.cancel()

@@ -2,6 +2,10 @@ class VError(Exception):
     pass
 
 
+class StopApplication(VError):
+    pass
+
+
 class InvalidUserAuthentication(VError):
     INVALID_PASSWORD = 301
     INVALID_CREDENTIALS = 300
@@ -22,6 +26,14 @@ class InvalidUserHash(VError):
 
     def __str__(self):
         return f'Error getting hash {self.username} [{self.error_code}] {self.message}'
+
+
+class InvalidUserCache(VError):
+    def __init__(self, username):
+        self.username = username
+
+    def __str__(self):
+        return f'User {self.username} not found in cache'
 
 
 class InvalidEvents(VError):

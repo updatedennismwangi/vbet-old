@@ -12,7 +12,7 @@ from abc import abstractmethod
 from .markets import Markets
 from .tickets import Ticket
 from .table import LeagueTable
-from vbet.game.players import Player, Messi, Ronaldo, Neymar, Arthur, Fati
+from vbet.game.players import Player, Messi, Ronaldo, Neymar, Arthur, Fati, Salah
 import secrets
 
 
@@ -85,6 +85,7 @@ class LeagueCompetition:
 
         self.players = {
             'messi': Messi(self),
+            # 'salah': Salah(self),
             # 'neymar': Neymar(self),
             # 'arthur': Arthur(self),
             # 'fati': Fati(self),
