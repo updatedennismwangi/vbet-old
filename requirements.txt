@@ -5,4 +5,4 @@ numpy==1.19.1
 pytz==2020.1
 websockets==8.1
 asynccmd~=0.2.4
-setuptools~=49.2.0
+setuptools~=49.2.1

@@ -21,13 +21,20 @@ Supported providers:
 
 Install
 =======
+Install latest version from stable channel:
 
+    -*using pip*
 
-Clone the repository with the default being the
-stable release `Link <https://github.com/updatedennismwangi/vbet.git>`_.
+        ``pip install vbet``
 
-Instructions on how to clone can be
-found `How to clone <https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/cloning-a-repository>`_.
+            *or*
+
+    -*github clone*
+        Clone the repository with the default being the
+        stable release `Link <https://github.com/updatedennismwangi/vbet.git>`_.
+
+        Instructions on how to clone can be
+        found `How to clone <https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/cloning-a-repository>`_.
 
 
 Starting the server
