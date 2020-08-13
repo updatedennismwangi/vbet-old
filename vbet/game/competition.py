@@ -1,30 +1,26 @@
-from vbet.utils.log import get_logger, async_exception_logger, exception_logger
-from datetime import datetime, timezone
-import pytz
-from typing import Dict, Any, List, Union, Tuple
-from vbet.utils import exceptions
-from vbet.utils.parser import map_resource_to_name
-import asyncio
-from vbet.utils.parser import Resource
-import time
+from __future__ import annotations
 
-from abc import abstractmethod
+import asyncio
+import time
+from datetime import datetime, timezone
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, TYPE_CHECKING
+
+from vbet.core import settings
+from vbet.utils import exceptions
+from vbet.utils.log import get_logger
+from vbet.utils.parser import map_resource_to_name
+from vbet.utils.parser import Resource
+from . import players
 from .markets import Markets
-from .tickets import Ticket
 from .table import LeagueTable
-from vbet.game.players import Player, Messi, Ronaldo, Neymar, Arthur, Fati, Salah
-import secrets
+from .tickets import Ticket
+
+if TYPE_CHECKING:
+    from vbet.game.user import User
 
 
 logger = get_logger('competition')
 account_logger = get_logger('account')
-
-GERMANY = 41047
-LALIGA = 14036
-PREMIER = 14045
-ITALY = 14035
-KENYAN = 14050
-COMPETITIONS = [ITALY, LALIGA, PREMIER, GERMANY, KENYAN]
 
 
 class LeagueCompetition:
@@ -35,76 +31,52 @@ class LeagueCompetition:
     TICKETS = 2
     RESULTS = 3
 
-    def __init__(self, user, game_id: int):
-        self.user = user
-        self.game_id = game_id
-        self.countdown: float = None
-        self.offset: float = None
-        self.mode: float = None
-        if self.game_id == 41047 or self.game_id == 14050:
-            self.max_week = 34
-        else:
-            self.max_week = 38
-        self.event_time = None
-        self.e_block_id = None
-        self.league = None
-        self.week = None
-        self.table = LeagueTable(self.max_week)
-        self.caching = False
-        self.caching_future = False
-        self.cache_enabled = True
-        self.cached = False
-        self.caching_multiple = False
-        self.caching_single = False
-        self.future_results = True
-        self.fetching_future = False
-        self.auto_skip = False
+    def __init__(self, user: User, game_id: int):
+        self.user: User = user
+        self.game_id: int = game_id
+        self.configured: bool = False
+        self.countdown: Optional[float] = None
+        self.offset: Optional[float] = None
+        self.mode: Optional[float] = None
+        self.max_week: int = 38 if game_id not in [settings.BUNDESLIGA, settings.KPL] else 34
+        self.event_time: Optional[float] = None
+        self.e_block_id: Optional[int] = None
+        self.league: Optional[int] = None
+        self.week: Optional[int] = None
+        self.table: LeagueTable = LeagueTable(self.max_week)
+        self.caching: bool = False
+        self.caching_future: bool = False
+        self.cache_enabled: bool = True
+        self.cached: bool = False
+        self.caching_multiple: bool = False
+        self.caching_single: bool = False
+        self.future_results: bool = True
+        self.fetching_future: bool = False
+        self.auto_skip: bool = False
 
-        self._online = False
-        self.lost = False
-        self.restoring = False
-        self.phase = LeagueCompetition.SLEEPING
+        self._online: bool = False
+        self.lost: bool = False
+        self.restoring: bool = False
+        self.phase: int = LeagueCompetition.SLEEPING
 
         self.required_weeks: List[int] = []
-        self.history_count = 0
-        self.max_history_count = 5
-        self.event_time_enabled = True
-        self.event_time_interval = 0
-        self.profile = 'MOBILE'
+        self.history_count: int = 0
+        self.max_history_count: int = 5
+        self.event_time_enabled: bool = True
+        self.event_time_interval: int = 0
+        self.profile: str = 'MOBILE'
         self.event_xs: Dict[int, Dict] = {}
         self.result_xs: Dict[int, Dict] = {}
         self.history_xs: Dict[int, Dict] = {}
         self.stats_xs: Dict[int, Dict] = {}
-        self.result_event = asyncio.Event()
+        self.result_event: asyncio.Event = asyncio.Event()
         self.team_labels: Dict[int, str] = {}
         self.active_tickets: List[int] = []
         self.blocks: Dict[int, int] = {}
         self.league_games: Dict[int, Dict] = {}
-        self.socket_closed = False
-        self.jackpot_ready = False
-
-        self.players = {
-            'messi': Messi(self),
-            # 'salah': Salah(self),
-            # 'neymar': Neymar(self),
-            # 'arthur': Arthur(self),
-            # 'fati': Fati(self),
-            # 'ronaldo': Ronaldo(self)
-        }
-
-    def init(self):
-        logger.info(f'[{self.user.username}:{self.game_id}] competition installed')
-
-    def configure(self, game_config: Dict):
-        self.countdown = game_config.get('countdown')
-        self.offset = game_config.get('offset')
-        self.mode = 1 if self.countdown > 0 else 0
-
-    async def start(self):
-        if self.lost:
-            self.lost = False
-            self.restoring = True
-        await self.next_block_event()
+        self.socket_closed: bool = False
+        self.jackpot_ready: bool = False
+        self.players: Dict[str, players.Player] = {}
 
     @property
     def online(self):
@@ -113,19 +85,36 @@ class LeagueCompetition:
     @online.setter
     def online(self, online: bool):
         if online:
+            if not self.configured:
+                game_config = self.user.settings.playlists.get(self.game_id)
+                # self.countdown = game_config.get('countdown')
+                # self.offset = game_config.get('offset')
+                # self.mode = 1 if self.countdown > 0 else 0
+                self.configured = True
             if not self._online or self.lost:
                 asyncio.ensure_future(self.start())
         self._online = online
 
-    @property
-    def authorized(self):
-        return self._authorized
+    # Setup
+    def init(self):
+        installed_players = ['ozil']
+        for player in installed_players:
+            mod = getattr(players, player)
+            cls = getattr(mod, player.capitalize())
+            player_obj = cls(self)  # type: players.Player
+            self.players[player.lower()] = player_obj
+            player_obj.active = True
 
-    @authorized.setter
-    def authorized(self, status: bool):
-        self._authorized = status
+        logger.info(f'[{self.user.username}:{self.game_id}] competition installed')
 
-    def resource_events(self, options: Dict):
+    async def start(self):
+        if self.lost:
+            self.lost = False
+            self.restoring = True
+        await self.next_block_event()
+
+    # Resources
+    def resource_events(self, options: Dict) -> Dict:
         event_time = self.get_event_time() if self.mode == self.SCHEDULED else None
         countdown = self.countdown if self.mode == self.SCHEDULED else None
         offset = self.offset if self.mode == self.SCHEDULED else None
@@ -141,7 +130,7 @@ class LeagueCompetition:
             'unitId': self.user.settings.unit_id
         }
 
-    def resource_results(self, options: Dict):
+    def resource_results(self, options: Dict) -> Dict:
         countdown = self.countdown if self.mode == self.SCHEDULED else None
         offset = self.offset if self.mode == self.SCHEDULED else None
         data = {
@@ -162,7 +151,7 @@ class LeagueCompetition:
         data.setdefault('eventTime', event_time)
         return data
 
-    def resource_stats(self, options: Dict):
+    def resource_stats(self, options: Dict) -> Dict:
         event_time = self.get_event_time() if self.mode == self.SCHEDULED else None
         countdown = self.countdown if self.mode == self.SCHEDULED else None
         offset = self.offset if self.mode == self.SCHEDULED else None
@@ -179,7 +168,7 @@ class LeagueCompetition:
             'unitId': self.user.settings.unit_id
         }
 
-    def resource_history(self, options: Dict):
+    def resource_history(self, options: Dict) -> Dict:
         return {
             'contentType': "PLAYLIST",
             'contentId': self.game_id,
@@ -223,6 +212,7 @@ class LeagueCompetition:
         xs = self.send(Resource.STATS, payload)
         self.stats_xs[xs] = payload
 
+    # Event blocks
     async def next_block_result(self, block: int = 1):
         await self.await_event_time()
         await self.next_result(self.e_block_id, block)
@@ -233,7 +223,7 @@ class LeagueCompetition:
     async def next_block_future(self, e_block_id: int, block: int = 10):
         await self.next_history(e_block_id, block)
 
-    @async_exception_logger('events')
+    # Resources callbacks
     async def events_callback(self, xs: int, valid_response: bool, body: Any):
         options = self.event_xs.pop(xs)
         try:
@@ -256,7 +246,6 @@ class LeagueCompetition:
             await asyncio.sleep(2)
             await self.next_event(options.get('n'))
 
-    @async_exception_logger('results')
     async def results_callback(self, xs: int, valid_response: bool, body: Any):
         options: Dict = self.result_xs.pop(xs)
         payload = options.get('payload')
@@ -286,7 +275,6 @@ class LeagueCompetition:
                 await asyncio.sleep(3)
                 await self.next_result(err.e_block_id, err.n, err.retry_count + 1)
 
-    @async_exception_logger('history')
     async def history_callback(self, xs: int, valid_response: bool, body: Any):
         if self.history_count > self.max_history_count:
             self.auto_skip = True
@@ -319,9 +307,9 @@ class LeagueCompetition:
             events = week_result.get('events')
             e_block_id = week_result.get('eBlockId')
             e_blocks.append(e_block)
-            event_data = week_result.get('data')
-            league = event_data.get('leagueId')
-            week = event_data.get('matchDay')
+            event_data = week_result.get('data', {})
+            league = event_data.get('leagueId', None)
+            week = event_data.get('matchDay', None)
             if league != self.league:
                 continue
             logger.debug(f'[{self.user.username}:{self.game_id}] History Block: {e_block_id} League: {league} Week:'
@@ -380,7 +368,8 @@ class LeagueCompetition:
                 await self.dispatch_events()
         else:
             if self.caching_future:
-                if not self.is_blocks_complete():
+                missing_blocks = self.get_missing_blocks()
+                if missing_blocks:
                     blocks = set(i for i in list(self.blocks.keys()))
                     block_id = max(blocks)
                     await self.next_block_future(block_id)
@@ -388,16 +377,21 @@ class LeagueCompetition:
                     self.caching_future = False
                     self.cached = True
                     logger.debug(f'[{self.user.username}:{self.game_id}] All events cached {self.league}')
+                    self.required_weeks = self.get_required_weeks()
                     await self.dispatch_events()
 
     async def resource_events_process(self, data: Dict):
-        self.e_block_id = data.get('eBlockId')
-        event_data = data.get('data')
-        if not event_data:
-            print(data)
-        league = event_data.get('leagueId')
-        match_day = event_data.get('matchDay')
-        if league != self.league:
+        league, match_day = None, None
+        e_block_id = data.get('eBlockId', None)
+        event_data = data.get('data', None)
+        if event_data:
+            league = event_data.get('leagueId', None)
+            match_day = event_data.get('matchDay', None)
+        if e_block_id and league and match_day:
+            self.e_block_id = e_block_id
+        else:
+            raise exceptions.InvalidEvents()
+        if league != self.league or not self.league:
             # Disable auto skip if running
             if match_day == 1:
                 self.auto_skip = False
@@ -405,13 +399,13 @@ class LeagueCompetition:
             self.league_games = {}
             self.blocks = {}
             self.cached = False
-            self.required_weeks = self.get_required_weeks()
-        self.league = league
+            self.required_weeks = []
+            self.league = league
         self.week = match_day
         logger.debug(f'[{self.user.username}:{self.game_id}] Event Block: {self.e_block_id} League: {self.league} '
                      f'Week: {self.week}')
         # Generate start time for on demand events
-        event_time = data.get('eventTime')
+        event_time = data.get('eventTime', None)
         self.process_event_time(event_time)
         # Parse all events
         events = data.get('events')
@@ -443,7 +437,7 @@ class LeagueCompetition:
         else:
             # Notify table of events
             self.table.on_event(self.league, self.week)
-            self.table.feed_stats(league, self.week, stats)
+            self.table.feed_stats(self.league, self.week, stats)
             missing = self.table.get_missing_weeks()
             if not missing:
                 await self.dispatch_events()
@@ -458,7 +452,7 @@ class LeagueCompetition:
                     await self.next_history(e_block_id, -10)
 
     async def resource_result_process(self, data: Dict):
-        e_block_id = data.get('eBlockId')
+        e_block_id = data.get('eBlockId', None)
         week = self.get_week_by_block(e_block_id)
         logger.debug(f'[{self.user.username}:{self.game_id}] Result Block: {e_block_id} Week : {week}')
         events = data.get('events')
@@ -533,16 +527,14 @@ class LeagueCompetition:
 
     async def resource_events_process_resume(self, data: Dict):
         self.restoring = False
-        e_block_id = data.get('eBlockId')
+        e_block_id = data.get('eBlockId', None)
         if e_block_id == self.e_block_id:
             logger.debug(f'[{self.user.username}:{self.game_id}] Competition resume success')
             if not self.user.demo:
-                if self.active_tickets:
-                    if await self.user.resume_competition(self.game_id):
-                        # Wait for player to complete ticket
-                        logger.info(f'[{self.user.username}:{self.game_id}] resuming tickets')
-                    else:
-                        await self.next_block_result()
+                if await self.user.resume_competition(self.game_id):
+                    # Wait for player to complete ticket
+                    # TODO: Implement resuming tickets callback
+                    logger.info(f'[{self.user.username}:{self.game_id}] resuming tickets')
                 else:
                     await self.next_block_result()
             else:
@@ -554,7 +546,8 @@ class LeagueCompetition:
             await self.resource_events_process(data)
 
     async def dispatch_events(self):
-        if not self.is_blocks_complete():
+        missing_blocks = self.get_missing_blocks()
+        if missing_blocks:
             self.caching_future = True
             self.cached = False
             logger.debug(f'[{self.user.username}:{self.game_id}] Caching league {self.league} ')
@@ -586,7 +579,8 @@ class LeagueCompetition:
 
     async def receive(self, xs: int, resource: str, payload: Dict):
         try:
-            callback = getattr(self, f'{map_resource_to_name(resource)}_callback')
+            func_name = f'{map_resource_to_name(resource)}_callback'
+            callback = getattr(self, func_name)  # type: Callable[[int, str, Dict], Coroutine[Any]]
         except AttributeError:
             pass
         else:
@@ -597,6 +591,7 @@ class LeagueCompetition:
         if player:
             player.odd_id = int(odd_id)
 
+    # Jackpot
     def setup_jackpot(self):
         self.jackpot_ready = True
         for player in self.players.values():
@@ -608,7 +603,6 @@ class LeagueCompetition:
             player.clear_jackpot()
 
     # Tickets processing
-    @async_exception_logger('process')
     async def process_tickets(self, tickets: List):
         self.reset_tickets()
         for ticket in tickets:
@@ -619,7 +613,7 @@ class LeagueCompetition:
             self.active_tickets.append(ticket.ticket_key)
         logger.debug(f'[{self.user.username}:{self.game_id}] Processing tickets complete : {len(tickets)}')
 
-    def serialize_ticket(self, ticket):
+    def serialize_ticket(self, ticket) -> Dict:
         events = ticket.events
         event_datas = []
         for event in events:
@@ -678,17 +672,17 @@ class LeagueCompetition:
         await self.next_block_result()
 
     # Get Weeks info
-    def is_blocks_complete(self):
-        if len(self.blocks) == self.max_week:
-            return True
-        return False
+    def get_missing_blocks(self) -> List:
+        all_weeks = set([i for i in range(1, self.max_week + 1)])
+        block_weeks = set(self.blocks.values())
+        return list(all_weeks - block_weeks)
 
-    def get_block_by_week(self, week: int):
+    def get_block_by_week(self, week: int) -> Optional[int]:
         for block, w in self.blocks.items():
             if w == week:
                 return block
 
-    def get_week_by_block(self, e_block_id: int):
+    def get_week_by_block(self, e_block_id: int) -> Optional[int]:
         return self.blocks.get(e_block_id, None)
 
     def process_missing(self, missing: List):
@@ -704,24 +698,18 @@ class LeagueCompetition:
             return block
 
     def get_required_weeks(self):
-        '''
-        weeks = [i for i in range(1, self.max_week + 1)]
-        k = [i for i in range(15, self.max_week - 5)]
-        r = secrets.choice(k)
-        u = [i for i in range(r, r+5)]
-        for _ in u:
-            weeks.remove(_)
-        k.extend([i for i in range(1, 16)])
-        return weeks
-        '''
-        return []
-        # return [i for i in range(1, 11)]
+        used_weeks = []
+        for player_name, player in self.players.items():
+            player.get_required_weeks()
+            used_weeks.extend(player.required_weeks)
+        all_weeks = set([i for i in range(1, self.max_week + 1)])
+        return list(all_weeks - set(used_weeks))
 
     async def get_future_weeks(self, weeks: List[int]):
         self.fetching_future = True
         for week in weeks:
             e_block = self.get_block_by_week(week)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(2)
             await self.next_result(e_block, 1)
 
     # Event time
@@ -739,8 +727,13 @@ class LeagueCompetition:
 
     def process_event_time(self, event_time):
         if event_time is None:
-            event_time = time.time() + self.event_time_interval
-        self.event_time = event_time
+            now = time.time()
+            if self.event_time_enabled:
+                self.event_time = now + self.event_time_interval
+            else:
+                self.event_time = now
+        else:
+            self.event_time = event_time
 
     # Save League
     async def on_league_completed(self):
@@ -760,7 +753,6 @@ class LeagueCompetition:
                     week_info[event_id] = {'team_a': team_a, 'team_b': team_b, 'stats': event_stats, 'odds': odds,
                                            'score': score}
                 league_info[week] = week_info
-            body = {'username': self.user.username, 'league': self.league, 'data': league_info, 'game_id': self.game_id}
             await self.user.store_competition(self.game_id, self.league, league_info)
 
     # Shutdown
@@ -768,7 +760,7 @@ class LeagueCompetition:
         futures = {}
         for player_id, player in self.players.items():
             player.closing = True
-            futures[player_id] = asyncio.create_task(player.shutdown_event.wait())
+            futures[player_id] = asyncio.create_task(player.exit())
         done, p = await asyncio.wait(list(futures.values()), return_when=asyncio.ALL_COMPLETED)
         socket = self.user.get_socket(self.game_id)
         await socket.exit()

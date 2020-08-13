@@ -1,11 +1,17 @@
-from vbet.utils.log import get_logger, async_exception_logger, exception_logger
-from vbet.utils.parser import Resource
-from vbet.core import settings
-from vbet.game.socket import Socket, TICKET_SOCKET
-from typing import List, Dict, Tuple
-from operator import attrgetter
+from __future__ import annotations
+
 import asyncio
 import time
+from operator import attrgetter
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+
+from vbet.game.socket import Socket, TICKET_SOCKET
+from vbet.utils.log import get_logger
+from vbet.utils.parser import Resource
+
+if TYPE_CHECKING:
+    from vbet.game.user import User
+
 
 logger = get_logger('ticket-manager')
 
@@ -14,13 +20,13 @@ class Bet:
     def __init__(
             self, odd_id: int, market_id: str, odd_value: float, odd_name: str,
             stake: float):
-        self.odd_id = odd_id
-        self.market_id = market_id
-        self.odd_value = odd_value
-        self.odd_name = odd_name
-        self.stake = stake
-        self.profit_type = "NONE"
-        self.status = 'OPEN'
+        self.odd_id: int = odd_id
+        self.market_id: str = market_id
+        self.odd_value: float = odd_value
+        self.odd_name: str = odd_name
+        self.stake: Optional[float] = stake
+        self.profit_type: str = "NONE"
+        self.status: str = 'OPEN'
 
     def __str__(self):
         return "OddId: {} MarketId: {} OddName: {} OddValue: {} Stake {}".format(self.odd_id,
@@ -29,20 +35,20 @@ class Bet:
 
 class Event:
     def __init__(self, event_id: int, league: int, week: int,
-                 participants: List):
-        self.event_id = event_id
-        self.bets = []
-        self.final_outcome = []
-        self.game_type = "GL"
-        self.playlist_id = None
-        self.event_time = None
-        self.ext_id = None
-        self.is_banker = False
+                 participants: List[Dict]):
+        self.event_id: int = event_id
+        self.bets: List[Bet] = []
+        self.final_outcome: List[int] = []
+        self.game_type: str = "GL"
+        self.playlist_id: Optional[int] = None
+        self.event_time: Optional[float] = None
+        self.ext_id: Optional[Any] = None
+        self.is_banker: bool = False
         # data
-        self.league = league
-        self.week = week
-        self.event_ndx = None
-        self.participants = participants
+        self.league: int = league
+        self.week: int = week
+        self.event_ndx: Optional[int] = None
+        self.participants: List[Dict] = participants
 
     @property
     def stake(self):
@@ -51,11 +57,10 @@ class Event:
             _stake += bet.stake
         return _stake
 
-    def get_formatted_participants(self):
-        players = []
-        for player in self.participants:
-            players.append(player.get('fifaCode'))
-        return players
+    def get_formatted_participants(self) -> Tuple:
+        home = self.participants[0].get('fifaCode')
+        away = self.participants[1].get('fifaCode')
+        return home, away
 
     @property
     def min_win(self):
@@ -90,25 +95,24 @@ class Ticket:
 
     def __init__(self, game_id: int, player: str):
         self.xs: int = -1
-        self.game_id = game_id
-        self.ticket_key = None
-        self.player = player
-        self.content = None
-        self.events = []
-        self.settings = {}
-        self.priority = 0
+        self.game_id: int = game_id
+        self.ticket_key: Optional[int] = None
+        self.player: str = player
+        self.content: Optional[Dict] = None
+        self.events: List[Event] = []
+        self.priority: int = 0
         self.sent: bool = False
-        self.socket_id = None
-        self._min_winning = 0
-        self._max_winning = 0
-        self._total_won = 0
+        self.socket_id: Optional[int] = None
+        self._min_winning: float = 0
+        self._max_winning: float = 0
+        self._total_won: float = 0
         self._status: int = self.READY
-        self._grouping = 0
-        self._system_count = 0
-        self._winning_count = 0
-        self._stake = 0
-        self.resolved = False
-        self.registered = False
+        self._grouping: int = 0
+        self._system_count: int = 0
+        self._winning_count: int = 0
+        self._stake: float = 0
+        self.resolved: bool = False
+        self.registered: bool = False
         self._sent_time: float = 0
 
     def __str__(self):
@@ -119,7 +123,7 @@ class Ticket:
     def set_priority(self, priority: int):
         self.priority = priority
 
-    def is_valid(self):
+    def is_valid(self) -> bool:
         if self.events:
             return True
         return False
@@ -129,7 +133,7 @@ class Ticket:
         return self._status
 
     @status.setter
-    def status(self, status):
+    def status(self, status: int):
         self._status = status
 
     @property
@@ -222,7 +226,7 @@ class Ticket:
     def add_event(self, event: Event):
         self.events.append(event)
 
-    def resolve(self, results: Dict):
+    def resolve(self, results: Dict) -> float:
         if self.mode == Ticket.SINGLE:
             for event in self.events:
                 event_data = results.get(event.event_id)
@@ -280,28 +284,27 @@ class TicketManager:
     JACKPOT_AFTER = 1
     JACKPOT_NIL = 2
 
-    def __init__(self, user):
-        self.user = user
-        self.ticket_queue = asyncio.Queue()
-        self._ticket_key = 0
-        self._ticket_id_lock = asyncio.Lock()
+    def __init__(self, user: User):
+        self.user: User = user
+        self.ticket_queue: asyncio.Queue = asyncio.Queue()
+        self._ticket_key: int = 0
+        self._ticket_id_lock: asyncio.Lock = asyncio.Lock()
         self.active_tickets: Dict[int, Dict[int, Ticket]] = {}
-        self.ticket_interval = self.DEFAULT_TICKET_INTERVAL
-        self.demo_ticket_interval = 2
-        self.last_ticket_time = time.time()
-        self.buffer_tickets = False  # Await response of last ticket before sending next
-        self.ticket_lock = asyncio.Lock()
-        self.send_lock = asyncio.Lock()
-        self.reg_lock = asyncio.Lock()
-        self.pool_lock = asyncio.Lock()
+        self.ticket_interval: float = self.DEFAULT_TICKET_INTERVAL
+        self.demo_ticket_interval: float = 2
+        self.last_ticket_time: float = time.time()
+        self.buffer_tickets: bool = False  # Await response of last ticket before sending next
+        self.ticket_lock: asyncio.Lock = asyncio.Lock()
+        self.send_lock: asyncio.Lock = asyncio.Lock()
+        self.reg_lock: asyncio.Lock = asyncio.Lock()
+        self.pool_lock: asyncio.Lock = asyncio.Lock()
         self.ticket_sender_future: asyncio.Future = asyncio.create_task(self.ticket_listener())
         self.ticket_scanner_future: asyncio.Future = asyncio.create_task(self.ticket_scanner())
-        self._ticket_wait = asyncio.Event()
+        self._ticket_wait: asyncio.Event = asyncio.Event()
         self.sockets: Dict[int, Socket] = {}
         self.socket_map: Dict[int, Dict[int, int]] = {}
-        self.min_sockets = 2
+        self.min_sockets: int = 2
         self.jackpot_resume: int = self.JACKPOT_NIL
-        self.host_index = -1
 
     async def ticket_scanner(self):
         logger.debug(f'[{self.user.username}] ticket scanner started')
@@ -353,7 +356,7 @@ class TicketManager:
 
         logger.debug(f'[{self.user.username}] queue listener stopped')
 
-    def register_ticket(self, ticket: Ticket):
+    def register_ticket(self, ticket: Ticket) -> int:
         ticket_key = self.generate_ticket_key()
         ticket.ticket_key = ticket_key
         return ticket_key
@@ -473,14 +476,14 @@ class TicketManager:
                     pass
             self.active_tickets[ticket.game_id] = competition_tickets
 
-    async def find_ticket(self, game_id: int, ticket_key: int):
+    async def find_ticket(self, game_id: int, ticket_key: int) -> Optional[Ticket]:
         async with self.pool_lock:
             competition_tickets = self.active_tickets.get(game_id, {})
             if competition_tickets:
                 ticket = competition_tickets.get(ticket_key, None)
                 return ticket
 
-    async def find_ticket_by_xs(self, socket_id, xs: int):
+    async def find_ticket_by_xs(self, socket_id, xs: int) -> Optional[Ticket]:
         async with self.send_lock:
             socket_map = self.socket_map.get(socket_id, {})
             try:
@@ -506,7 +509,7 @@ class TicketManager:
                 return True
         self.user.tickets_complete(game_id)
 
-    async def resume_competition_tickets(self, game_id: int):
+    async def resume_competition_tickets(self, game_id: int) -> bool:
         competition_tickets = self.active_tickets.get(game_id)
         a = False
         for ticket_key, ticket in competition_tickets.items():
@@ -568,12 +571,23 @@ class TicketManager:
                 await asyncio.sleep(to_sleep)
         self.last_ticket_time = time.time()
 
-    async def get_available_socket(self):
+    async def get_available_socket(self) -> Socket:
         sockets = [socket for socket in self.sockets.values() if socket.authorized]
         if sockets:
             socket = sorted(sockets, key=attrgetter('last_used'))[0]
             socket.last_used = time.time()
             return socket
+
+    async def socket_online(self, socket_id: int):
+        if not self._ticket_wait.is_set():
+            self._ticket_wait.set()
+
+    async def socket_offline(self, socket_id: int):
+        socket = self.sockets.get(socket_id, None)
+        if socket:
+            self.sockets.pop(socket_id)
+        if not self.sockets:
+            self.user.close_event.set()
 
     def setup_jackpot(self):
         for i in range(0, self.min_sockets):
@@ -588,12 +602,6 @@ class TicketManager:
     def generate_ticket_key(self):
         self._ticket_key += 1
         return self._ticket_key
-
-    def get_server_host(self):
-        self.host_index += 1
-        if self.host_index >= len(settings.SERVERS):
-            self.host_index = 0
-        return settings.SERVERS[self.host_index]
 
     def exit(self):
         self.close_sockets()

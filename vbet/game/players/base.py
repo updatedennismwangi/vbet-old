@@ -1,32 +1,46 @@
-from vbet.utils.log import get_logger, exception_logger
-from typing import Dict, List
-from abc import abstractmethod
-from vbet.game.markets import Markets
-from vbet.game.accounts import Account
-from vbet.game.tickets import Ticket, Event, Bet
-import asyncio
+from __future__ import annotations
 
+import asyncio
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING
+
+from vbet.game.accounts import Account
+from vbet.game.markets import Markets
+from vbet.game.tickets import Ticket
+from vbet.utils.log import get_logger
+
+if TYPE_CHECKING:
+    from vbet.game.competition import LeagueCompetition
+
+
+NAME = 'player'
 
 logger = get_logger('player')
-account_logger = get_logger('account')
 
 
 class Player:
-    def __init__(self, competition, name="player"):
-        self.competition = competition
-        self.min_week = 1
-        self.league = None
-        self.current_league_complete = False
-        self._active = False
-        self.closing = False
-        self.name = name
-        self.bet_ready = False
-        self.jackpot_ready = False
-        self._bet = False
-        self._forecast = True
-        self.odd_id: int = None
+    def __init__(self, competition: LeagueCompetition, name: str = None):
+        self.competition: LeagueCompetition = competition
+        self.min_week: int = 1
+        self.league: Optional[int] = None
+        self.current_league_complete: bool = False
+        self._active: bool = False
+        self.closing: bool = False
+        self.name: str = name if name else NAME
+        self.bet_ready: bool = False
+        self.jackpot_ready: bool = False
+        self._bet: bool = False
+        self._forecast: bool = True
+        self.odd_id: Optional[int] = None
         self.shutdown_event: asyncio.Event = asyncio.Event()
+        self.shutdown_event.set()
         self.account: Account = Account(self.competition.user.account_manager)
+        self.required_weeks: List[int] = [i for i in range(1, self.competition.max_week + 1)]
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.name
 
     @property
     def active(self):
@@ -40,7 +54,7 @@ class Player:
         else:
             logger.debug(f'[{self.competition.user.username}:{self.competition.game_id}] {self.name} Deactivated')
 
-    async def on_event(self):
+    async def on_event(self) -> List[Ticket]:
         if self.competition.league != self.league:
             self.league = self.competition.league
             self.current_league_complete = False
@@ -61,28 +75,21 @@ class Player:
         else:
             await self.account.on_win(ticket.total_won)
         await self.on_ticket_resolve(ticket)
-        '''
-        credit = await self.account.manager.credit
-        account_logger.info(f'[{self.competition.user.username}:{self.competition.game_id}] {self.name} '
-                            f'Bal : {credit:.2f} Bonus: [L{self.account.manager.bonus_level + 1} : '
-                            f'{self.account.manager.jackpot_value}%] ['
-                            f'{self.account.manager.jackpot_amount:.2f}] Won :'
-                            f' {ticket.total_won:.2f} Stake : ['
-                            f'{self.account.manager.total_stake:.2f}]')
-        '''
 
     async def on_ticket_resolve(self, ticket: Ticket):
         pass
 
-    async def forecast(self):
+    async def forecast(self) -> List[Ticket]:
         tickets = []  # type: List[Ticket]
         return tickets
 
-    def can_bet(self):
+    def can_bet(self) -> bool:
         return self._bet
 
-    def can_forecast(self):
-        if self.competition.week < self.min_week or self.current_league_complete:
+    def can_forecast(self) -> bool:
+        if self.current_league_complete:
+            return False
+        if self.competition.week < self.min_week:
             return False
         return self._forecast
 
@@ -93,7 +100,7 @@ class Player:
         self.jackpot_ready = False
 
     @staticmethod
-    def get_result_ratio(last_result: List[str]):
+    def get_result_ratio(last_result: List[str]) -> Tuple[int, int]:
         home_result = []
         away_result = []
         home_ratio = 0
@@ -118,7 +125,7 @@ class Player:
         return home_ratio, away_ratio
 
     @staticmethod
-    def pick_winner(head_to_head: List[List[str]], draw=False):
+    def pick_winner(head_to_head: List[List[str]], draw=False) -> Tuple[Any, Any]:
         a = 0
         b = 0
         c = 0
@@ -144,7 +151,7 @@ class Player:
         return None, None
 
     @staticmethod
-    def get_market_info(market: str):
+    def get_market_info(market: str) -> Tuple[Any, Any, Any]:
         for market_type, market_data in Markets.items():
             if market in market_data:
                 data = market_data.get(market)
@@ -152,8 +159,8 @@ class Player:
                     return market_type, data.get('name'), int(data.get('key'))
         return None, None, None
 
-    async def shutdown(self):
-        return self.terminate()
+    def get_required_weeks(self):
+        self.required_weeks = [i for i in range(1, self.competition.max_week + 1)]
 
-    async def terminate(self):
+    async def exit(self):
         await self.shutdown_event.wait()

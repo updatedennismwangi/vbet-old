@@ -1,97 +1,60 @@
-from vbet.utils.log import *
-from vbet.utils import exceptions
+import argparse
+from typing import List
+
 from vbet.core import settings
-import vbet
-import asyncio
-import signal
-from vbet.core.ws_server import WsServer
-from vbet.core.user_manager import UserManager
+from vbet.utils.parser import create_dir
 
 
-logger = get_logger('vbet')
+def parse_args(args: List):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-a', default=settings.DEFAULT_API_NAME, choices=settings.API_BACKENDS, help=f'Select an api '
+                                                                                                     f'backend to '
+                                                                                 f'initialize. Default'
+                                                                                 f' {settings.DEFAULT_API_NAME}')
+    parser.add_argument('-p', '--port', default=settings.WS_PORT, type=int, help=f'WS server port higher than 1000 for '
+                                                                                 f'api '
+                                                                                 f'connection. Default {settings.WS_PORT}')
+    parser.add_argument('-d', action='store_true', help=f'Set the asyncio event loop debug to true or false. Default '
+                                                        f'{settings.LOOP_DEBUG}')
+    parser.add_argument('-v', action='count', default=0, help=f'Set the Verbose level with highest -vv. Default -v')
+
+    return parser.parse_args(args)
 
 
-class Vbet:
-    def __init__(self):
-        self.close_event = asyncio.Event()
+def setup(args):
+    settings.API_NAME = args.a
+    settings.WS_PORT = args.port
+    settings.LOOP_DEBUG = args.d
+    verbose = args.v
 
-        self._exit_flag = False
+    if verbose == 0:
+        settings.LOG_LEVEL = 'INFO'
+        settings.FILE_LOG_LEVEL = 'INFO'
+    elif verbose == 1:
+        settings.LOG_LEVEL = 'INFO'
+        settings.FILE_LOG_LEVEL = 'DEBUG'
+    else:
+        settings.LOG_LEVEL = 'DEBUG'
+        settings.FILE_LOG_LEVEL = 'DEBUG'
 
-        self.quit_event = asyncio.Event()
+    create_dir(settings.LOG_DIR)
+    create_dir(settings.TMP_DIR)
+    create_dir(settings.DATA_DIR)
+    create_dir(settings.CACHE_DIR)
+    for game in settings.LIVE_GAMES:
+        create_dir(f'{settings.CACHE_DIR}/{game}')
 
-        self.loop: asyncio.BaseEventLoop = None
 
-        self.ws_server = WsServer(self)
+def application(args: List) -> int:
+    # Configure settings
+    args = parse_args(args)
+    setup(args)
 
-        self.manager = UserManager(self)
+    # Logging setup
+    from vbet.utils.logger import setup_logger
+    setup_logger()
 
-    @property
-    def closing(self):
-        return self.quit_event.is_set()
-
-    def run(self):
-        logger.info(f'Vbet Server version {vbet.__VERSION__}')
-        self.loop = asyncio.get_event_loop()
-        signal.signal(signal.SIGINT, self.sig_int)
-        signal.signal(signal.SIGTERM, self.sig_term)
-        self.loop.set_exception_handler(self.exception_handler)
-        self.loop.set_debug(settings.LOOP_DEBUG)
-        self.loop.run_until_complete(self.manager.init(self.loop))
-        self.ws_server.setup()
-        try:
-            while not self._exit_flag:
-                self.loop.run_forever()
-            raise KeyboardInterrupt
-        except KeyboardInterrupt:
-            try:
-                # Graceful shutdown
-                self.quit_event.set()
-                logger.info('Gracefully terminating server')
-                self.clean_up()
-            except KeyboardInterrupt:
-                logger.info(f'Cold shutdown')
-        finally:
-            self.loop.close()
-            logger.info(f'Terminated application')
-
-    async def exit_uri(self, session_key: int, body):
-        if not self._exit_flag and not self.closing:
-            self._exit_flag = True
-            self.loop.stop()
-
-    def clean_up(self):
-        server_task = self.loop.create_task(self.ws_server.wait_closed())
-        manager_task = self.loop.create_task(self.manager.wait_closed())
-        tasks = asyncio.gather(*[server_task, manager_task], return_exceptions=True)
-        tasks.add_done_callback(self.clean_up_callback)
-
-        # Run event loop until all tasks are completed
-        while not self.loop.is_running() and not self.close_event.is_set():
-            self.loop.run_forever()
-
-    def clean_up_callback(self, future: asyncio.Future):
-        self.close_event.set()
-        raise exceptions.StopApplication
-
-    def cancel_tasks(self):
-        # Cancel all pending tasks
-        tasks = asyncio.gather(*asyncio.Task.all_tasks(), return_exceptions=True)
-        tasks.add_done_callback(lambda a: self.loop.stop())
-
-    def exception_handler(self, loop, context):
-        if 'exception' in context:
-            if isinstance(context['exception'], exceptions.StopApplication):
-                logger.info(f'Server shutdown success')
-                self.loop.stop()
-            elif isinstance(context['exception'], asyncio.CancelledError):
-                print(context)
-            elif 'exception' not in context or not isinstance(context['exception'], asyncio.CancelledError):
-                loop.default_exception_handler(context)
-
-    @staticmethod
-    def sig_int(sig: int, frame):
-        raise KeyboardInterrupt
-
-    @staticmethod
-    def sig_term(sig: int, frame):
-        print(sig)
+    # Start up
+    from vbet.core.vbet import Vbet
+    app = Vbet()
+    return app.run()

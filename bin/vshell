@@ -1,0 +1,14 @@
+#!/usr/bin/env python
+import inspect
+import os
+import sys
+
+exec_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+app_dir = os.path.dirname(exec_dir)
+sys.path.insert(0, app_dir)
+
+from vbet.core.vshell import vshell
+
+
+if __name__ == "__main__":
+    vshell()

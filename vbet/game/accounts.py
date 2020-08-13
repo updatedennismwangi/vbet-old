@@ -1,5 +1,10 @@
+from __future__ import annotations
+
 import asyncio
-from typing import Dict, Tuple, Any, Union
+from typing import Dict, List, Tuple, TYPE_CHECKING, Union
+
+if TYPE_CHECKING:
+    from vbet.game.user import User
 
 
 class AccountManager:
@@ -7,21 +12,21 @@ class AccountManager:
     profit: int
     _lost_amount: int
 
-    def __init__(self, user, credit=100000):
-        self.user = user
+    def __init__(self, user: User, credit: float = 100000):
+        self.user: User = user
         self.setup(credit)
-        self._credit = credit
-        self.credit_lock = asyncio.Lock()
-        self.lost_lock = asyncio.Lock()
-        self.won_lock = asyncio.Lock()
-        self._bonus_level = 0
-        self.bonus_mode = False
-        self.bonus_total = 0
-        self._jackpot_amount = 25
-        self._levels = [25, 50, 125, 500, 1250, 2500]
-        self._total_stake = 0
-        self.recover_account = RecoverAccountShare(self)
-        self.initialized = False
+        self._credit: float = credit
+        self.credit_lock: asyncio.Lock = asyncio.Lock()
+        self.lost_lock: asyncio.Lock = asyncio.Lock()
+        self.won_lock: asyncio.Lock = asyncio.Lock()
+        self._bonus_level: int = 0
+        self.bonus_mode: bool = False
+        self.bonus_total: float = 0
+        self._jackpot_amount: float = 25
+        self._levels: List[float] = [25, 50, 125, 500, 1250, 2500]
+        self._total_stake: float = 0
+        self.recover_account: RecoverAccountShare = RecoverAccountShare(self)
+        self.initialized: bool = False
 
     async def initialize(self):
         self.initialized = True
@@ -59,7 +64,7 @@ class AccountManager:
     def jackpot_amount(self, amount):
         self._jackpot_amount = float(amount)
 
-    def is_bonus_ready(self):
+    def is_bonus_ready(self) -> bool:
         if self.bonus_mode:
             if self.total_stake >= self.bonus_total:
                 return True
@@ -98,19 +103,19 @@ class AccountManager:
         async with self.lost_lock:
             self._lost_amount += credit
 
-    async def borrow(self, amount) -> Union[Tuple[bool, Union[float, Any]], Tuple[None, None]]:
+    async def borrow(self, amount) -> Tuple[bool, Union[float, None]]:
         amount = round(amount, 2)
         async with self.credit_lock:
             if self._credit >= amount:
                 self._credit -= amount
                 return True, amount
-        return None, None
+        return False, None
 
-    def normalize_amount(self, amount):
+    def normalize_amount(self, amount) -> float:
         game_settings = self.user.settings.get_val_settings('GL')
         if game_settings:
-            min_stake = game_settings.get('min_stake')
-            max_stake = game_settings.get('max_stake')
+            min_stake = game_settings.get('min_stake', 0)
+            max_stake = game_settings.get('max_stake', 0)
             if amount < min_stake:
                 amount = min_stake
             if amount > max_stake:
@@ -124,13 +129,17 @@ class Account:
     def __init__(self, manager: AccountManager):
         self.manager: AccountManager = manager
         self._won_amount = 0
-        self._initial_token = 0
+        self._initial_token = 5
         self._lost_amount = self._initial_token
         self._profit_token = 0
+        self.max_stake = 100000
 
     @property
     def lost_amount(self):
         return self._lost_amount
+
+    def reset_lost_amount(self):
+        self._lost_amount = self._initial_token
 
     def setup(self, config: Dict):
         pass
@@ -150,19 +159,15 @@ class Account:
 class RecoverAccount(Account):
     def __init__(self, manager: AccountManager):
         super(RecoverAccount, self).__init__(manager)
-        self.amount_lost = self._initial_token
+        self.amount_lost: float = self._initial_token
+        self.max_stake_lost: float = 100000
 
-    def get_recover_amount(self, odd: float):
+    def get_stake(self, odd: float) -> float:
         stake = self.amount_lost / (odd - 1)
-        if stake > 10000:
+        if stake > self.max_stake or (stake + self.amount_lost) > self.max_stake_lost:
             self.amount_lost = self._initial_token
             stake = self.amount_lost / (odd - 1)
         return stake
-
-    def is_lost(self):
-        if self.amount_lost > self._initial_token:
-            return True
-        return False
 
     async def on_win(self, amount: float):
         await super().on_win(amount)
@@ -179,8 +184,7 @@ class TokenAccount(Account):
         self.chips = [100, 150, 75, 75, 100]
         self.index = 0
 
-    @property
-    def stake(self):
+    def get_stake(self) -> float:
         return self.chips[self.index]
 
     async def on_win(self, amount: float):
@@ -196,12 +200,21 @@ class TokenAccount(Account):
         await super().on_loose(amount)
 
 
+class FixedStake(Account):
+    def __init__(self, manager: AccountManager, stake: float):
+        super(FixedStake, self).__init__(manager)
+        self.stake: float = stake
+
+    def get_stake(self) -> float:
+        return self.stake
+
+
 class FixedProfitAccount(Account):
     def __init__(self, manager: AccountManager):
         super(FixedProfitAccount, self).__init__(manager)
         self.profit = 5
 
-    def get_stake(self, odd_value: float):
+    def get_stake(self, odd_value: float) -> float:
         return round(self.profit / (odd_value - 1), 2)
 
 
@@ -210,8 +223,8 @@ class RecoverAccountShare(Account):
         super(RecoverAccountShare, self).__init__(manager)
         self.amount_lost = self._initial_token
 
-    def get_recover_amount(self, odd: float):
-        stake = (self.amount_lost / 4) / (odd - 1)
+    def get_stake(self, odd_value: float) -> float:
+        stake = (self.amount_lost / 4) / (odd_value - 1)
         return stake
 
     async def on_win(self, amount: float):
@@ -223,3 +236,5 @@ class RecoverAccountShare(Account):
     async def on_loose(self, amount: float):
         await super().on_loose(amount)
         self.amount_lost += (amount + self._profit_token)
+
+

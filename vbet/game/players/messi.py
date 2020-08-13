@@ -1,32 +1,25 @@
-from vbet.utils.log import get_logger, exception_logger, async_exception_logger
 from typing import Dict, List
-from .base import Player
-from vbet.game.accounts import RecoverAccount
-from vbet.game.tickets import Ticket, Event, Bet
-import secrets
 
+from vbet.game.accounts import RecoverAccount
+from vbet.game.tickets import Bet, Event, Ticket
+from vbet.utils.log import get_logger
+from .base import Player
 
 NAME = 'messi'
 
 logger = get_logger(NAME)
 
 
-class Messi(Player):
+class CustomPlayer(Player):
     def __init__(self, competition):
-        super(Messi, self).__init__(competition)
-        self.name = NAME
-        self.active = True
+        super(CustomPlayer, self).__init__(competition, NAME)
         self.account = RecoverAccount(self.competition.user.account_manager)
         self.team = None
         self.event_id = None
         self.event_data = {}
         self.odd_id = 0
+        self.min_week = 2
         self.shutdown_event.set()
-
-    def can_forecast(self):
-        if self.competition.week < 2:
-            return False
-        return self._forecast
 
     async def forecast(self):
         table = self.competition.table.table  # type: List[Dict]

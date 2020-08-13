@@ -1,14 +1,20 @@
-from vbet.utils.log import *
-import aiohttp
-from vbet.utils.exceptions import InvalidUserAuthentication, InvalidUserHash
 import asyncio
+from typing import Dict, Optional
+
+import aiohttp
+
+import vbet
 from vbet.core import settings
+from vbet.utils.exceptions import InvalidUserAuthentication, InvalidUserHash
+from vbet.utils.log import get_logger
 
 logger = get_logger('auth')
 
+
 HEADERS = {
-    'User-Agent': '[vbet player: 1.0]'
+    f'User-Agent': f'[vbet : {vbet.__VERSION__}]'
 }
+
 
 WSS_URL = 'wss://virtual-proxy.golden-race.net:9443/vs'
 if settings.API_NAME == settings.BETIKA:
@@ -17,41 +23,38 @@ if settings.API_NAME == settings.BETIKA:
     COOKIES_URL = 'https://api.betika.com'
 
     async def login_hash(username: str, user_id: int, socket_id: int, http: aiohttp.ClientSession):
-        pin_hash = None
+        pin_hash: Optional[str] = None
         while pin_hash is None:
             try:
-                response = await http.post(HASH_URL, json={'profile_id': user_id})
-                data = await response.json(content_type="text/json")
+                response = await http.post(HASH_URL, json={'profile_id': user_id})  # type: aiohttp.ClientResponse
+                data = await response.json(content_type="text/json")  # type: Dict
                 if response.status == 200:
-                    pin_hash = data.get('onlineHash', None)
-                    if pin_hash:
+                    pin_hash = data.get('onlineHash', None)  # type: Optional[str]
+                    if isinstance(pin_hash, str):
                         return pin_hash
                     else:
-                        raise InvalidUserHash(username, response.status, data)
-            except aiohttp.ClientConnectionError as err:
+                        raise InvalidUserHash(username, response.status, body=data)
+            except (aiohttp.ClientConnectionError, InvalidUserHash) as err:
                 logger.error(f'[{username}:{socket_id}] get-hash {err}')
                 await asyncio.sleep(30)
-            except InvalidUserHash as err:
-                await asyncio.sleep(30)
-                logger.error(err)
 
 
     async def login_password(username: str, password: str, http: aiohttp.ClientSession):
-        unit_id = None
-        token = None
+        unit_id: Optional[int] = None
+        token: Optional[str] = None
         while unit_id is None:
             try:
                 payload = {'mobile': username, 'password': password, 'remember': True, 'src': 'DESKTOP'}
-                response = await http.post(LOGIN_URL, json=payload)
-                data = await response.json(content_type="application/json")
+                response = await http.post(LOGIN_URL, json=payload)  # type: aiohttp.ClientResponse
+                data = await response.json(content_type="application/json")  # type: Dict
                 if response.status == 200:
-                    token = data.get('token')
-                    if not token:
+                    token = data.get('token', None)  # type: Optional[str]
+                    user_data = data.get('data', {})  # type: Dict
+                    user = user_data.get('user', {})  # type: Dict
+                    unit_id = user.get('id', None)  # type: Optional[int]
+                    if not token or not unit_id:
                         raise InvalidUserAuthentication(username, password,
                                                         InvalidUserAuthentication.UNKNOWN_ERROR, body=data)
-                    user_data = data.get('data')
-                    user = user_data.get('user')
-                    unit_id = user.get('id')
                     return unit_id, token
                 else:
                     raise InvalidUserAuthentication(username, password,
@@ -66,43 +69,37 @@ else:
     COOKIES_URL = 'https://www.mozzartbet.co.ke'
 
     async def login_hash(username: str, user_id: int, socket_id: int, http: aiohttp.ClientSession):
-        pin_hash = None
+        pin_hash: Optional[str] = None
         while pin_hash is None:
             try:
-                response = await http.get(HASH_URL)
-                data = await response.json(content_type="application/json")
+                response = await http.get(HASH_URL)  # type: aiohttp.ClientResponse
+                data = await response.json(content_type="application/json")  # type: Dict
                 if response.status == 200:
-                    pin_hash = data.get('onlineHash', None)
-                    if pin_hash:
-                        session_id = data.get('session_id', None)
+                    pin_hash = data.get('onlineHash', None)  # type: Optional[str]
+                    if isinstance(pin_hash, str):
                         return pin_hash
                     else:
-                        raise InvalidUserHash(username, response.status, data)
-            except aiohttp.ClientConnectionError as err:
+                        raise InvalidUserHash(username, response.status, body=data)
+            except (aiohttp.ClientConnectionError, InvalidUserHash) as err:
                 logger.error(f'[{username}:{socket_id}] get-hash {err}')
                 await asyncio.sleep(30)
-            except InvalidUserHash as err:
-                await asyncio.sleep(30)
-                logger.error(err)
-
 
     async def login_password(username: str, password: str, http: aiohttp.ClientSession):
-        unit_id = None
-        token = None
+        unit_id: Optional[int] = None
+        token: Optional[str] = None
         while unit_id is None:
             try:
                 fingerprint = 'a39ad90130543e3547bf7b2bda9369'
-                payload = {'fingerprint': fingerprint, 'isCasinoPage': False, 'password': password, 'username':
-                    username}
-                response = await http.post(LOGIN_URL, json=payload)
-                data = await response.json(content_type="application/json")
+                body = {'fingerprint': fingerprint, 'isCasinoPage': False, 'password': password, 'username': username}
+                response = await http.post(LOGIN_URL, json=body)  # type: aiohttp.ClientResponse
+                data = await response.json(content_type="application/json")  # type: Dict
                 if response.status == 200:
-                    status = data.get('status')
-                    if not status:
+                    status = data.get('status', None)  # type: Optional[str]
+                    if isinstance(status, str):
                         raise InvalidUserAuthentication(username, password,
                                                         InvalidUserAuthentication.UNKNOWN_ERROR, body=data)
-                    user = data.get('user')
-                    unit_id = user.get('userId')
+                    user = data.get('user', {})  # type: Dict
+                    unit_id = user.get('userId', None)  # type: Optional[int]
                     return unit_id, token
                 else:
                     raise InvalidUserAuthentication(username, password,

@@ -1,6 +1,7 @@
 import logging.config
-from vbet.core import settings
+import time
 
+from vbet.core import settings
 
 config = {
     'version': 1,
@@ -55,6 +56,8 @@ config = {
         }
     }
 }
-logging.config.dictConfig(config)
 
-# logging.Formatter.converter = time.gmtime
+
+def setup_logger():
+    logging.config.dictConfig(config)
+    logging.Formatter.converter = time.gmtime

@@ -1,18 +1,17 @@
-from typing import Dict, List
 from operator import itemgetter
-from .markets import Markets
+from typing import Dict, List, Optional
 
 
 class LeagueTable:
     def __init__(self, max_week):
-        self.league = 0
-        self.week = 1
-        self.max_week = max_week
+        self.league: Optional[int] = None
+        self.week: Optional[int] = 1
+        self.max_week: int = max_week
         self.results_pool: Dict = {}
         self.results_ids_pool: Dict = {}
         self.winning_ids_pool: Dict = {}
         self._table: List = []
-        self.ready_table: List = []
+        self.ready_table: Dict = {}
         self.raw_table: Dict = {}
         self.event_block_map: Dict[int: int] = {}
         self.league_stats: Dict[int: Dict[int, Dict]] = {}
@@ -21,20 +20,18 @@ class LeagueTable:
     def table(self):
         return self._table
 
+    def is_empty(self) -> bool:
+        if self.event_block_map:
+            return False
+        return True
+
     def on_event(self, league: int, week: int):
         if not self.league or self.league != league:
             self.clear_table()
             self.league = league
         self.week = week
 
-    def is_empty(self):
-        if self.event_block_map:
-            return False
-        return True
-
     def feed_result(self, e_block_id: int, league: int, week: int, results: Dict, results_ids: Dict, winning_ids: Dict):
-        if not week:
-            print(week)
         if league == self.league:
             self.event_block_map[week] = e_block_id
             self.results_pool[week] = results
@@ -49,7 +46,7 @@ class LeagueTable:
     def get_last_matches(self, team_id):
         return sorted(self.raw_table.get(team_id).items(), key=itemgetter(0), reverse=True)
 
-    def get_min_block(self):
+    def get_min_block(self) -> Optional[int]:
         if self.event_block_map:
             blocks = list(self.event_block_map.values())
             blocks.sort()
@@ -85,23 +82,27 @@ class LeagueTable:
             points = 0
             gf = 0
             ga = 0
+            won = 0
+            lost = 0
+            draw = 0
             streak = []
-            if team_data:
-                try:
-                    week_values = sorted(team_data.items(), key=itemgetter(0))
-                except TypeError as er:
-                    print(team_data)
-                    week_values = []
-                for week_info in week_values:
-                    week = week_info[0]
-                    week_data = week_info[1]
-                    p = week_data[0]
-                    points += p
-                    streak.append(p)
-                    gf += week_data[1]
-                    ga += week_data[2]
-                _table[team] = {'team': team, 'pos': 0, 'points': points,
-                                'gf': gf, 'ga': ga, 'gd': gf - ga, 'streak': streak}
+            week_values = sorted(team_data.items(), key=itemgetter(0))
+            for week_info in week_values:
+                week = week_info[0]
+                week_data = week_info[1]
+                p = week_data[0]
+                points += p
+                streak.append(p)
+                gf += week_data[1]
+                ga += week_data[2]
+                if p == 3:
+                    won += 1
+                elif p == 1:
+                    draw += 1
+                else:
+                    lost += 1
+            _table[team] = {'team': team, 'pos': 0, 'points': points, 'won': won, 'draw': draw, 'lost': lost,
+                            'gf': gf, 'ga': ga, 'gd': gf - ga, 'streak': streak}
         self.ready_table = _table
         # Sort
         data = [_ for _ in _table.values()]
@@ -142,25 +143,25 @@ class LeagueTable:
         self.event_block_map = {}
         self.league_stats = {}
 
-    def get_raw_team_data(self, team):
+    def get_raw_team_data(self, team) -> Optional[Dict]:
         return self.raw_table.get(team, None)
 
-    def get_missing_weeks(self):
+    def get_missing_weeks(self) -> List:
         pool_weeks = set(self.event_block_map.keys())
         all_weeks = set([i for i in range(1, self.week)])
         missing = list(all_weeks - pool_weeks)
         return missing
 
-    def is_complete(self):
+    def is_complete(self) -> bool:
         return len(self.event_block_map) == self.max_week
 
-    def get_week_results(self, week_id: int):
+    def get_week_results(self, week_id: int) -> Dict:
         return self.results_pool.get(week_id, {})
 
-    def get_week_stats(self, week_id: int):
+    def get_week_stats(self, week_id: int) -> Dict:
         return self.league_stats.get(week_id, {})
 
-    def check_weeks(self, weeks: List[int]):
+    def check_weeks(self, weeks: List[int]) -> List:
         not_ready = []
         for week in weeks:
             if week not in self.event_block_map:

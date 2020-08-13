@@ -1,38 +1,29 @@
-#!/usr/bin/env python
+import argparse
 import os
 import sys
-import inspect
+
 import asynccmd
-import argparse
 import websockets
-import asyncio
-from typing import Any, List, Dict
 
-exec_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-app_dir = os.path.dirname(exec_dir)
-sys.path.insert(0, app_dir)
-
-from vbet.core import settings
-from vbet.utils.parser import encode_json, decode_json
+import vbet
 from vbet.game.competition import *
-
-
-VERSION = 1.0
+from vbet.utils.parser import decode_json, encode_json
 
 
 class Vshell(asynccmd.Cmd):
     def __init__(self, host, port):
         super().__init__(mode="Reader")
-        self.host = host
-        self.port = port
-        self.server_url = f'ws://{self.host}:{self.port}'
-        self.loop = None
-        self.prompt = '$ > '
-        self.websocket: websockets.WebSocketClientProtocol = None
+        self.host: str = host
+        self.port: int = port
+        self.server_url: str = f'ws://{self.host}:{self.port}'
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.prompt: str = '$ > '
+        self.websocket: Optional[websockets.WebSocketClientProtocol] = None
 
     @property
     def intro(self):
-        return f'\nVshell v{VERSION}  {self.server_url}\n'
+        return f'\nVshell url={self.server_url} build v{vbet.__VERSION__}\n\nType (help) to see a list of ' \
+               f'available commands\n'
 
     @property
     def commands(self):
@@ -62,7 +53,7 @@ class Vshell(asynccmd.Cmd):
                         data = decode_json(payload)
                         uri = data.get('uri')
                         body = data.get('body')
-                        sys.stdout.write(f'\r>>> {uri} {body}\n')
+                        sys.stdout.write(f'\r>>> {uri} {body}\n {self.prompt}')
                     except websockets.ConnectionClosed:
                         break
         except ConnectionError:
@@ -108,7 +99,6 @@ class Vshell(asynccmd.Cmd):
             print(self.do_str_login())
 
     def do_help(self, arg):
-        help_handler = f'Available command list: {self.commands} '
         if arg:
             arg = arg.split(' ')
             command = str(arg[0])
@@ -119,7 +109,6 @@ class Vshell(asynccmd.Cmd):
             else:
                 print(super()._default(command))
         else:
-            print(help_handler)
             for i in dir(self.__class__):
                 if i.startswith('do_str'):
                     handler = getattr(self, i)
@@ -168,10 +157,10 @@ class Vshell(asynccmd.Cmd):
         pass
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--host', default=settings.WS_HOST, help=f'Vshell server host. Default {settings.WS_HOST}')
-    parser.add_argument('-p', default=settings.WS_PORT, type=int, help=f'Server port. Default {settings.WS_PORT}')
-    args = parser.parse_args(sys.argv[1:])
+def vshell():
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('--host', default=settings.WS_HOST, help=f'Vshell server host. Default {settings.WS_HOST}')
+    arg_parser.add_argument('-p', default=settings.WS_PORT, type=int, help=f'Server port. Default {settings.WS_PORT}')
+    args = arg_parser.parse_args(sys.argv[1:])
     vs = Vshell(args.host, args.p)
     vs.run()

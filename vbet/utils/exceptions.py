@@ -1,3 +1,6 @@
+from typing import Optional, Dict
+
+
 class VError(Exception):
     pass
 
@@ -11,26 +14,29 @@ class InvalidUserAuthentication(VError):
     INVALID_CREDENTIALS = 300
     UNKNOWN_ERROR = 303
 
-    def __init__(self, username, password, code=301, body=None):
-        self.username = username
-        self.password = password
-        self.code = code
-        self.body = body
+    def __init__(self, username: str, password: str, code: int = 301, body=None):
+        self.username: str = username
+        self.password: str = password
+        self.code: int = code
+        self.body: Optional[Dict] = body
+
+    def __str__(self):
+        return f'Error login user {self.username} [{self.code}] {self.body}'
 
 
 class InvalidUserHash(VError):
-    def __init__(self, username, error_code, message):
-        self.username = username
-        self.error_code = error_code
-        self.message = message
+    def __init__(self, username: str, code: int, body: Optional[dict] = None):
+        self.username: str = username
+        self.code: int = code
+        self.body: Optional[Dict] = body
 
     def __str__(self):
-        return f'Error getting hash {self.username} [{self.error_code}] {self.message}'
+        return f'Error getting hash {self.username} [{self.code}] {self.body}'
 
 
 class InvalidUserCache(VError):
-    def __init__(self, username):
-        self.username = username
+    def __init__(self, username: str):
+        self.username: str = username
 
     def __str__(self):
         return f'User {self.username} not found in cache'
@@ -41,14 +47,14 @@ class InvalidEvents(VError):
         pass
 
     def __str__(self):
-        return 'Invalid Results'
+        return 'Invalid Events'
 
 
 class InvalidResults(VError):
     def __init__(self, e_block_id: int, n: int, retry_count: int):
-        self.e_block_id = e_block_id
-        self.n = n
-        self.retry_count = retry_count
+        self.e_block_id: int = e_block_id
+        self.n: int = n
+        self.retry_count: int = retry_count
 
     def __str__(self):
         return f'{self.e_block_id} | {self.n}'
@@ -56,9 +62,9 @@ class InvalidResults(VError):
 
 class InvalidHistory(VError):
     def __init__(self, e_block_id: int, n: int, retry_count: int):
-        self.e_block_id = e_block_id
-        self.n = n
-        self.retry_count = retry_count
+        self.e_block_id: int = e_block_id
+        self.n: int = n
+        self.retry_count: int = retry_count
 
     def __str__(self):
         return f'{self.e_block_id} | {self.n | self.retry_count}'

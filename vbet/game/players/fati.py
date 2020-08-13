@@ -1,21 +1,19 @@
-from vbet.utils.log import get_logger, exception_logger, async_exception_logger
-from typing import Dict, List
-from .base import Player
-from vbet.game.accounts import RecoverAccount, TokenAccount
-from vbet.game.tickets import Ticket, Event, Bet
-import numpy
+from typing import Dict
 
+from vbet.game.accounts import FixedProfitAccount
+from vbet.game.tickets import Bet, Event, Ticket
+from vbet.utils.log import get_logger
+from .base import Player
 
 NAME = 'fati'
 
 logger = get_logger(NAME)
 
 
-class Fati(Player):
+class CustomPlayer(Player):
     def __init__(self, competition):
-        super(Fati, self).__init__(competition)
-        self.name = NAME
-        self.active = True
+        super(CustomPlayer, self).__init__(competition, NAME)
+        self.account = FixedProfitAccount(self.competition.user.account_manager)
         self.min_week = 1
 
     async def forecast(self):
@@ -42,7 +40,7 @@ class Fati(Player):
                 continue
             ticket = Ticket(self.competition.game_id, self.name)
             event = Event(event_id, self.competition.league, self.competition.week, participants)
-            stake = 50
+            stake = self.account.get_stake(odd_value)
             bet = Bet(odd_id, market_id, odd_value, odd_name, stake)
             event.add_bet(bet)
             win = round(stake * odd_value, 2)

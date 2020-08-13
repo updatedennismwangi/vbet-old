@@ -19,7 +19,7 @@ setuptools.setup(
     url="https://github.com/updatedennismwangi/vbet.git",
     packages=setuptools.find_packages(),
     install_requires=required,
-    scripts=['bin/run', 'bin/vs'],
+    scripts=['bin/vrun', 'bin/vshell'],
     classifiers=[
         "Programming Language :: Python :: 3.8",
         "Operating System :: Unix",

@@ -1,21 +1,18 @@
-from vbet.utils.log import get_logger, exception_logger, async_exception_logger
-from typing import Dict, List
-from .base import Player
-from vbet.game.accounts import RecoverAccount, TokenAccount
-from vbet.game.tickets import Ticket, Event, Bet
-import numpy
+from typing import Dict
 
+from vbet.game.accounts import RecoverAccount
+from vbet.game.tickets import Bet, Event, Ticket
+from vbet.utils.log import get_logger
+from .base import Player
 
 NAME = 'fati'
 
 logger = get_logger(NAME)
 
 
-class Fati(Player):
+class CustomPlayer(Player):
     def __init__(self, competition):
-        super(Fati, self).__init__(competition)
-        self.name = NAME
-        self.active = True
+        super(CustomPlayer, self).__init__(competition, NAME)
         self.account = RecoverAccount(self.competition.user.account_manager)
         self.min_week = 1
 
@@ -36,7 +33,7 @@ class Fati(Player):
             all_odds = [odds[odd_index]]
             # market_id = 'FullTimeUnderOver2_5GoalGoalNoGoal'
             # odd_name = "HomeOver2_5GoalGoal"
-            # all_odds = [i for i in numpy.arange(2, 15, 0.01)]
+            # all_odds = []
             for odd_value in all_odds:
                 odd_value = round(odd_value, 2)
                 ticket = Ticket(self.competition.game_id, self.name)

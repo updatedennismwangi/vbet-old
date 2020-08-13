@@ -1,6 +1,6 @@
 import json
-from typing import Dict, Any
-import time
+import os
+from typing import Dict, Any, Tuple, Optional, Union, List
 from datetime import datetime
 import pytz
 
@@ -9,7 +9,7 @@ def encode_json(data: Dict) -> str:
     return json.dumps(data)
 
 
-def decode_json(data: Any) -> [Dict, None]:
+def decode_json(data: Any) -> Union[Dict, List, None]:
     if isinstance(data, str):
         try:
             return json.loads(data)
@@ -18,34 +18,37 @@ def decode_json(data: Any) -> [Dict, None]:
     return None
 
 
-def inspect_ws_server_payload(payload: Dict):
-    uri = payload.get('uri', None)
-    body = payload.get('body', None)
+def inspect_ws_server_payload(payload: Dict) -> Optional[Tuple[str, Dict]]:
+    uri: Optional[str] = payload.get('uri', None)
+    body: Optional[Any] = payload.get('body', None)
     if uri is not None and body is not None:
         return uri, body
-    return None, None
 
 
-def inspect_websocket_response(payload: Dict):
-    res = payload.get('res', None)
-    xs = payload.get('xs', None)
-    status_code = res.get('statusCode', None)
-    valid_response = res.get('validResponse', False)
-    resource = res.get('resource', None)
-    body = res.get('body', None)
-    _resource = None
+def inspect_websocket_response(payload: Dict) -> Optional[Tuple[int, str, int, bool, Any]]:
+    res: Dict = payload.get('res', {})
+    xs: Optional[int] = payload.get('xs', None)
+    status_code: Optional[int] = res.get('statusCode', None)
+    valid_response: bool = res.get('validResponse', False)
+    resource: Optional[str] = res.get('resource', None)
+    body: Optional[Any] = res.get('body', None)
+    _resource: Optional[str] = None
     for k, v in Resources.items():
         if v == resource:
             _resource = k
             break
     if _resource:
         _resource = resource
-    return xs, _resource, valid_response, body
+        return xs, _resource, status_code, valid_response, body
 
 
 def get_ticket_timestamp() -> str:
     now = datetime.now(pytz.UTC).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]
     return "%s%s" % (now, "Z")
+
+
+def create_dir(dir_name: str):
+    os.makedirs(dir_name, exist_ok=True)
 
 
 class Resource:
@@ -57,12 +60,6 @@ class Resource:
     HISTORY = '/eventBlocks/history'
     STATS = '/eventBlocks/stats'
     TICKETS_FIND_BY_ID = '/tickets/findById'
-
-
-class UserResource:
-    XS = -1
-    CONNECTED = 'connected'
-    LOST = 'lost'
 
 
 Resources = {
