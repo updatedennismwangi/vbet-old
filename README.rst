@@ -37,7 +37,7 @@ Starting the server
         ``./vrun -a betika -p 9000 -vv``
 
 * Pip
-    *Installation via pip will add **vrun** to your path*.
+    Installation via pip will add **vrun** to your path.
 
         ``vrun -a betika -p 9000 -vv``
 
@@ -64,7 +64,7 @@ To get started with the shell:
         ``./vshell --port 9000``
 
 * Pip
-    * Installation via pip will add **vshell** to your path*.
+    Installation via pip will add **vshell** to your path.
 
         `vshell --port 9000`
 
